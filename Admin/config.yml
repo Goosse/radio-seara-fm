@@ -1,0 +1,18 @@
+backend:
+   name: github
+   repo: Goosse/radio-seara-fm
+
+locale: 'pt'
+media_folder: Resources
+
+collections:
+  - name: algemas-quebradas
+    label: Algemas Quebradas
+    folder: Content/algemas-quebradas
+    create: true
+    fields:
+      - {name: title, label: Titulo}
+      - {name: date, label: Data de publicação, widget: datetime, dateFormat: DD-MM-YYYY, timeFormat: H:mm \hor\a\s, format: YYYY-MM-DD H:mm}
+      - {name: body, label: Descriçao, widget: markdown}
+      - {name: audio.url, label: Audio, widget: file, pattern: ['.*\.(?:mp3|m4a)$', "Tem que ser um arquivo de audio mp3 ou m4a"]}
+      - {name: tags, label: Tags, widget: "string"}
