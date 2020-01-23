@@ -4,5 +4,9 @@
       "target": "temporary-public-storage"
     }
   },
-    "staticDistDir": "./"
+    "collect": {
+      "settings": {
+        "staticDistDir": "./"
+      }
+    }
 }
