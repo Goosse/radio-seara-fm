@@ -1,0 +1,52 @@
+<html lang="en"><head>
+<meta charset="utf-8">
+<title>Get that meta</title>
+
+</head>
+
+<body>
+<audio preload="none" id="aud" controls="" src="https://stream.radioseara.fm/96.mp3" type="audio/mpeg">
+</audio>
+<div></div>
+<ul>
+</ul>
+<script>
+
+    console.log("fetching");
+    let Heads = new Headers({"icy-metadata": "1"});
+    fetch("https://stream.radioseara.fm/96.mp3", {headers: Heads})
+        .then(logResponse)
+        .catch(logError);
+    
+    function logResponse(response){
+    console.log('We received a response! -- ', response);
+    for (var pair of response.headers.entries()) {
+   console.log(pair[0]+ ': '+ pair[1]);
+}
+
+}
+    
+function logError(error) {
+  console.log('Looks like there was a problem:', error);
+}
+
+    
+//    if ('serviceWorker' in navigator) {
+//  var iceworker = navigator.serviceWorker.register('serviceworkerMin.js')
+//    .then(function(reg) {
+//      console.log('Icecast service worker registered');
+//      addItem('Icecast service worker registered. Click play to start the stream.');
+//    }).catch(function(error) {
+//    console.warn('Error ' + error);
+//    addItem('Error ' + error);
+//  });
+//}
+    function addItem(text) {
+  var node = document.createElement("li");
+  var textnode = document.createTextNode(text);
+  node.appendChild(textnode);
+  document.querySelector('ul').appendChild(node);
+}
+    </script>
+
+</body></html>
