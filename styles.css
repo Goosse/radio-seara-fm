@@ -1,163 +1,227 @@
-/**
-*  Publish Foundation theme
-*  Copyright (c) John Sundell 2019
-*  MIT license, see LICENSE file for details
-*/
-
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
+@import url("https://fonts.googleapis.com/css2?family=Montserrat&family=Open+Sans&display=swap");
+@font-face {
+  font-family: Xilosa;
+  src: url(xilosa.ttf);
+}
+html {
+  font-family: "Open Sans";
+  font-size: 14px;
+  color: #3F3F3F;
 }
 
-body {
-    background: #fff;
-    color: #000;
-    font-family: Helvetica, Arial;
-    text-align: center;
-}
-
-.wrapper {
-    max-width: 900px;
-    margin-left: auto;
-    margin-right: auto;
-    padding: 40px;
-    text-align: left;
-}
-
-header {
-    background-color: #eee;
-}
-
-header .wrapper {
-    padding-top: 30px;
-    padding-bottom: 30px;
-    text-align: center;
-}
-
-header a {
-    text-decoration: none;
-}
-
-header .site-name {
-    font-size: 1.5em;
-    color: #000;
-    font-weight: bold;
-}
-
-nav {
-    margin-top: 20px;
-}
-
-nav li {
-    display: inline-block;
-}
-
-h1 {
-    margin-bottom: 20px;
-    font-size: 2em;
+h1, h2 {
+  font-family: Xilosa;
+  text-transform: uppercase;
+  font-size: 2em;
 }
 
 h2 {
-    margin: 20px 0;
+  color: #007985;
+  text-align: center;
 }
 
-p {
-    margin-bottom: 10px;
+h3 {
+  font-family: Montserrat;
+  font-size: 1.05vw;
 }
 
-a {
-    color: inherit;
+header {
+  height: 80px;
+}
+header li :not(.selected) {
+  font-family: Xilosa;
+  background-color: #007985;
+  border-radius: 100px;
+  color: #fff;
+}
+header li {
+  display: inline-block;
+  margin-left: 22px;
+}
+header li a {
+  padding: 5px 20px;
 }
 
-.description {
-    margin-bottom: 40px;
+.header-wrapper {
+  margin: 10px 10%;
+  justify-content: space-between;
+  display: flex;
 }
 
-.item-list > li {
-    display: block;
-    padding: 20px;
-    border-radius: 20px;
-    background-color: #eee;
-    margin-bottom: 20px;
+.marca img {
+  height: 60px;
 }
 
-.item-list > li:last-child {
-    margin-bottom: 0;
+nav {
+  align-self: center;
 }
 
-.item-list h1 {
-    margin-bottom: 15px;
-    font-size: 1.3em;
+ul {
+  list-style-type: none;
 }
 
-.item-list p {
-    margin-bottom: 0;
+.banner {
+  height: 220px;
+  padding: 0 20% 0 10%;
+  color: #fff;
+  display: flex;
+  justify-content: space-between;
+  background-image: url("banner-marca-color-75.png");
+  background-position: right;
+  background-repeat: no-repeat;
+  background-size: contain;
+  background-blend-mode: luminosity;
+}
+.banner.green {
+  background-color: #007985;
+}
+.banner.orange {
+  background-color: #EC9F17;
+}
+.banner .info {
+  align-self: center;
+}
+.banner .description {
+  max-width: 345px;
 }
 
-.tag-list {
-    margin-bottom: 15px;
+.banner-artwork {
+  align-self: center;
+  text-align: center;
+  width: 125px;
+}
+.banner-artwork p {
+  margin: 0;
+}
+.banner-artwork img {
+  width: 100%;
 }
 
-.tag-list li,
-.tag {
-    display: inline-block;
-    background-color: #000;
-    color: #ddd;
-    padding: 4px 6px;
-    border-radius: 5px;
-    margin-right: 5px;
+p.no-ar {
+  background-color: red;
+  padding: 2px;
+  margin-top: 5px;
+  border-radius: 5px;
 }
 
-.tag-list a,
-.tag a {
-    text-decoration: none;
+p.programa-no-ar {
+  font-size: 0.8em;
 }
 
-.item-page .tag-list {
-    display: inline-block;
+body .wrapper {
+  padding: 0 20%;
 }
 
-.content {
-    margin-bottom: 40px;
+.program-list {
+  display: flex;
+  flex-flow: row wrap;
+  justify-content: space-between;
+  text-align: center;
 }
-
-.browse-all {
-    display: block;
-    margin-bottom: 30px;
+.program-list li {
+  margin-left: 0;
+  width: 30%;
+  margin-bottom: 10px;
 }
-
-.all-tags li {
-    font-size: 1.4em;
-    margin-right: 10px;
-    padding: 6px 10px;
+.program-list li:hover .tint {
+  background: rgba(0, 121, 133, 0.82);
+}
+.program-list li:hover .play-overlay {
+  background: rgba(255, 255, 255, 0.5);
+}
+.program-list li:hover .play-overlay:after {
+  border-color: transparent transparent transparent white;
+}
+.program-list img {
+  width: 100%;
+  vertical-align: top;
+}
+.program-list .artwork-wrapper {
+  position: relative;
+}
+.program-list .tint {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  left: 0;
+  display: flex;
+  transition: all 0.3s linear;
+}
+.program-list .play-overlay {
+  width: 50px;
+  height: 50px;
+  border-radius: 100%;
+  margin: auto;
+  transition: all 0.3s linear;
+}
+.program-list .play-overlay:after {
+  content: "";
+  display: inline-block;
+  position: relative;
+  top: 12px;
+  left: 3px;
+  border-style: solid;
+  border-width: 12px 0 12px 20px;
+  border-color: transparent;
+  transition: all 0.3s linear;
+}
+.program-list h3 {
+  margin: 4px 0;
+}
+.program-list p {
+  color: #949494;
+  margin: 0;
+  font-size: 0.8vw;
 }
 
 footer {
-    color: #8a8a8a;
+  background-color: #EC9F17;
+  color: #fff;
+  margin-top: 50px;
 }
 
-@media (prefers-color-scheme: dark) {
-    body {
-        background-color: #222;
-    }
-
-    body,
-    header .site-name {
-        color: #ddd;
-    }
-
-    .item-list > li {
-        background-color: #333;
-    }
-
-    header {
-        background-color: #000;
-    }
+.footer-wrapper {
+  margin: 0 10%;
+  padding: 30px 0 20px 0;
 }
 
-@media(max-width: 600px) {
-    .wrapper {
-        padding: 40px 20px;
-    }
+.social-wrapper {
+  width: 300px;
+  margin: 0 auto 30px auto;
 }
+
+.participe-social {
+  font-family: Xilosa;
+  font-size: 1.5em;
+  text-align: center;
+  margin: 0;
+}
+
+.social-buttons-list {
+  display: flex;
+  justify-content: space-around;
+}
+.social-buttons-list img {
+  width: 40px;
+}
+
+.copyright-wrapper {
+  border-top: solid 1px #fff;
+  font-size: 0.8em;
+}
+
+body {
+  margin: 0px;
+}
+
+a {
+  text-decoration: none;
+  color: inherit;
+}
+
+ul {
+  padding: 0;
+}
+
+/*# sourceMappingURL=styles.css.map */
