@@ -1,6 +1,7 @@
 backend:
    name: github
    repo: Goosse/radio-seara-fm-publisher
+   base_url: https://api.radioseara.fm/github-auth
 
 locale: 'pt'
 media_library:
