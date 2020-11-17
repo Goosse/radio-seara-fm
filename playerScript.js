@@ -1,4 +1,4 @@
-var es = new EventSource('http://radioseara.fm/updates/current-song-stream');
+var es = new EventSource('https://api.radioseara.fm/updates/current-song-stream');
 
 es.onmessage = function (event) {
   console.log("on message: " + event.data)
