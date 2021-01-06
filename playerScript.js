@@ -8,8 +8,11 @@ es.addEventListener('new-song', function (event) {
     console.log(event.data)
     var parsedData = JSON.parse(event.data)
     console.log(parsedData)
-    document.getElementById("artist").innerHTML = parsedData.artist ? parsedData.artist : ""
-    document.getElementById("live-track-title").innerHTML = parsedData.title ? parsedData.title : ""
-    document.getElementById("artwork").setAttribute("src", parsedData.artwork ? 'http://localhost:3000/' + parsedData.artwork : "/recursos/missingArtwork.jpg")
-    document.getElementById("lyrics").innerHTML = parsedData.lyrics ? parsedData.lyrics : ""
+//    document.getElementById("artist").innerHTML = parsedData.artist ? parsedData.artist : ""
+//    document.getElementById("live-track-title").innerHTML = parsedData.title ? parsedData.title : ""
+    document.getElementById("live-track-title").innerHTML = parsedData.artist ? parsedData.artist : ""
+    document.getElementById("live-track-artist").innerHTML = parsedData.artist ? parsedData.artist : ""
+
+   // document.getElementById("artwork").setAttribute("src", parsedData.artwork ? 'http://localhost:3000/' + parsedData.artwork : "/recursos/missingArtwork.jpg")
+   // document.getElementById("lyrics").innerHTML = parsedData.lyrics ? parsedData.lyrics : ""
 });
