@@ -435,7 +435,7 @@ button .label, .button .label {
   margin: auto;
 }
 
-#start-time, #track-info {
+#live-track-artist, #track-info {
   color: #949494;
   margin: 0;
   font-size: 0.9em;
