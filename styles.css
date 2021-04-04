@@ -450,7 +450,7 @@ button .label, .button .label {
 }
 .ao-vivo:before {
   content: "";
-  background: url(/recursos/capas/ao-vivo.jpg);
+  background: url(/recursos/capas/ao-vivo.webp);
   background-size: cover;
   background-position: center;
   opacity: 0.2;
