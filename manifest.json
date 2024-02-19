@@ -1,0 +1,12 @@
+{
+  "name": "Rádio Seara",
+  "icons": [
+    {
+      "src": "/recursos/capas/ao-vivo.webp",
+      "type": "image/webp",
+      "sizes": "614x614"
+    }
+    ],
+    "start_url": "http://localhost:3000",
+    "display": "standalone"
+}
