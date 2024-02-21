@@ -455,8 +455,7 @@
        "src": "icons/ios/1024.png",
        "sizes": "1024x1024"
      }
-   ]
-    ],
+   ],
     "start_url": "https://pwa--radio-seara.netlify.app",
     "theme_color": "#007985",
     "background_color": "#fff",
