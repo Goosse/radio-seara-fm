@@ -1,7 +1,7 @@
 //Somehow I need to get a build tag built into thise serviceworker file, because caches will only be updated if this file changes.
 
-const buildTag = "2024223212942";
-const precachedResources = ["/", "/algemas-quebradas/", "/recursos/capas/algemas-quebradas.webp", "/culto-ice-nova-russas/", "/recursos/capas/culto-ice-nova-russas.webp", "/familia-bencao-de-deus/", "/recursos/capas/familia-bencao-de-deus.webp", "/jornal-seara/", "/recursos/capas/jornal-seara.webp", "/ligado-na-verdade/", "/recursos/capas/ligado-na-verdade.webp", "/luz-da-vida/", "/recursos/capas/luz-da-vida.webp", "/minha-historia/", "/recursos/capas/minha-historia.webp", "/seara-esporte-clube/", "/recursos/capas/seara-esporte-clube.webp", "/a-esposa-por-tras/", "/baixar-algemas-quebradas/", "/baixar-minha-historia/", "/parceiros/", "/ao-vivo/", "/styles.css"];
+const buildTag = "2024223214418";
+const precachedResources = ["/", "/algemas-quebradas/", "/recursos/capas/algemas-quebradas.webp", "/culto-ice-nova-russas/", "/recursos/capas/culto-ice-nova-russas.webp", "/familia-bencao-de-deus/", "/recursos/capas/familia-bencao-de-deus.webp", "/jornal-seara/", "/recursos/capas/jornal-seara.webp", "/ligado-na-verdade/", "/recursos/capas/ligado-na-verdade.webp", "/luz-da-vida/", "/recursos/capas/luz-da-vida.webp", "/minha-historia/", "/recursos/capas/minha-historia.webp", "/seara-esporte-clube/", "/recursos/capas/seara-esporte-clube.webp", "/a-esposa-por-tras/", "/parceiros/", "/baixar-minha-historia/", "/baixar-algemas-quebradas/", "/ao-vivo/", "/styles.css"];
 const origin = new URL(location).origin;
 
 
