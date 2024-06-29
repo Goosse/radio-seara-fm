@@ -1,0 +1,25 @@
+[[redirects]]
+  from = "/quem-jesus-cristo-1"
+  to = "https://avmi.formstack.com/forms/quem_jesus_cristo_passo_1"
+  status = 200
+[[redirects]]
+  from = "/quem-jesus-cristo-2"
+  to = "https://avmi.formstack.com/forms/quem_jesus_cristo_passo_2"
+  status = 200
+[[redirects]]
+  from = "/quem-jesus-cristo-3"
+  to = "https://avmi.formstack.com/forms/quem_jesus_cristo_passo_3_"
+  status = 200
+[[redirects]]
+  from = "/quem-jesus-cristo-4"
+  to = "https://avmi.formstack.com/forms/quem_jesus_cristo_passo_4_"
+  status = 200
+[[redirects]]
+  from = "/quem-jesus-cristo-5"
+  to = "https://avmi.formstack.com/forms/quem_jesus_cristo_passo_5_"
+  status = 200
+[[redirects]]
+  from = "/quem-jesus-cristo-6"
+  to = "https://avmi.formstack.com/forms/quem_jesus_cristo_passo_6_"
+  status = 200
+
