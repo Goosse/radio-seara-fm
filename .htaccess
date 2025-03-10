@@ -1,9 +1,0 @@
-RewriteEngine On
-
-# Redirect http://radioseara.com.br to https://radioseara.fm
-RewriteCond %{HTTP_HOST} ^radioseara\.com\.br$ [NC]
-RewriteRule ^(.*)$ https://radioseara.fm/$1 [R=301,L]
-
-# Redirect both http and https for algemasquebradas.com.br to https://radioseara.fm/algemas-quebradas/
-RewriteCond %{HTTP_HOST} ^algemasquebradas\.com\.br$ [NC]
-RewriteRule ^(.*)$ https://radioseara.fm/algemas-quebradas/ [R=301,L]

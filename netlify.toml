@@ -1,4 +1,28 @@
 [[redirects]]
+from = "http://radioseara.com.br"
+to = "https://radioseara.fm"
+status = 301.0
+force = true
+
+[[redirects]]
+from = "https://radioseara.com.br"
+to = "https://radioseara.fm"
+status = 301.0
+force = true
+
+[[redirects]]
+from = "https://algemasquebradas.com.br"
+to = "https://radioseara.fm/algemas-quebradas/"
+status = 301.0
+force = true
+
+[[redirects]]
+from = "http://algemasquebradas.com.br"
+to = "https://radioseara.fm/algemas-quebradas/"
+status = 301.0
+force = true
+
+[[redirects]]
   from = "/quem-jesus-cristo-1"
   to = "https://avmi.formstack.com/forms/quem_jesus_cristo_passo_1"
   status = 200
