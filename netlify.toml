@@ -48,6 +48,6 @@ force = true
   status = 200
 [[redirects]]
   from = "/stream"
-  to = "https://avmi.formstack.com/forms/quem_jesus_cristo_passo_6_"
+  to = "https://8396.brasilstream.com.br/stream"
   status = 200
 
