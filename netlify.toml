@@ -49,5 +49,10 @@ force = true
 [[redirects]]
   from = "/stream102"
   to = "https://8396.brasilstream.com.br/stream"
-  status = 200
-
+  status = 301
+  force = true
+[[redirects]]
+  from = "/stream104"
+  to = "https://8404.brasilstream.com.br/stream"
+  status = 301
+  force = true
