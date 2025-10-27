@@ -457,7 +457,7 @@
      }
    ],
     "start_url": "https://pwa--radio-seara.netlify.app",
-    "theme_color": "#007985",
+    "theme_color": "#052C31",
     "background_color": "#fff",
     "display": "standalone"
 }
