@@ -29,54 +29,6 @@ stream.addEventListener("volumechange", function() {
 });
 
 
-//if('mediaSession' in navigator) {
-//  const player = document.querySelector('audio');
-//
-//  navigator.mediaSession.metadata = new MediaMetadata({
-//    title: 'Rádio Seara',
-// //   artist: 'Thievery Corporation',
-////  album: 'The Mirror Conspiracy',
-//    artwork: [
-//      {
-//        src: 'https://radioseara.fm/recursos/capas/ao-vivo.webp',
-//        sizes: '256x256',
-//        type: 'image/webp'
-//      },
-//      {
-//        src: 'https://radioseara.fm/recursos/capas/ao-vivo.webp',
-//        sizes: '512x512',
-//        type: 'image/webp'
-//      }
-//    ]
-//  });
-//
-//  navigator.mediaSession.setActionHandler('play', () => toggleLiveStream(document.getElementById("live-play-button")));
-//  navigator.mediaSession.setActionHandler('pause', () => toggleLiveStream(document.getElementById("live-play-button")));
-// //   navigator.mediaSession.setActionHandler('seekbackward', (details) => {
-// //     const skipTime = details.seekOffset || 1;
-// //     player.currentTime = Math.max(player.currentTime - skipTime, 0);
-// //   });
-// // 
-// //   navigator.mediaSession.setActionHandler('seekforward', (details) => {
-// //     const skipTime = details.seekOffset || 1;
-// //     player.currentTime = Math.min(player.currentTime + skipTime, player.duration);
-// //   });
-// 
-//   navigator.mediaSession.setActionHandler('seekto', (details) => {
-//     if (details.fastSeek && 'fastSeek' in player) {
-//       player.fastSeek(details.seekTime);
-//       return;
-//     }
-//     player.currentTime = details.seekTime;
-//  });
-
-  // navigator.mediaSession.setActionHandler('previoustrack', () => {
-  //   player.currentTime = 0;
-  // });
-//}    
-    
-
-
 function toggleLiveStream(playButton){
     if (stream.paused){
         addClass(playButton.id, "playing");
