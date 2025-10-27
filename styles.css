@@ -25,6 +25,11 @@ h3 {
   font-weight: bold;
 }
 
+span {
+  line-height: 12px;
+  font-size: 12px;
+}
+
 button, .button {
   font-family: "Open Sans";
   font-size: 0.9em;
@@ -59,8 +64,13 @@ header li a {
   display: flex;
 }
 
+.marca {
+  display: block;
+  margin: auto;
+}
 .marca img {
-  height: 100px;
+  height: 86px;
+  margin: 0 auto;
 }
 
 nav {
@@ -73,21 +83,32 @@ ul {
 
 @media only screen and (min-width: 768px) {
   .header-wrapper {
-    margin: 0 10%;
+    margin: 0 8px;
   }
 }
+.banner-wrapper {
+  display: grid;
+  grid-template-columns: 2fr 3fr;
+  column-gap: 8px;
+  padding: 0 8px;
+  margin-bottom: 15px;
+}
+.banner-wrapper .banner {
+  margin: 0;
+}
+
 .banner {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  min-height: 220px;
   color: white;
-  padding: 20px 10%;
-  text-align: center;
+  padding: 8px;
+  margin: 0 8px;
+  border-radius: 10px;
 }
 .banner.top {
-  background-image: url("banner-marca-color-75.webp");
-  background-position: top;
+  display: grid;
+  grid-template-columns: 4fr 8fr 3fr;
+  column-gap: 10px;
+  background-image: url("banner-marca-color-50.webp");
+  background-position: right;
   background-repeat: no-repeat;
   background-size: contain;
   background-blend-mode: luminosity;
@@ -98,19 +119,58 @@ ul {
 .banner.orange {
   background-color: #EC9F17;
 }
+.banner.iframe {
+  position: relative;
+  overflow: hidden;
+  width: calc(100% - 16px);
+  padding: calc((100% - 16px) * 9 / 16) 0 0 0;
+  margin-bottom: 15px;
+}
+.banner.parceiros {
+  display: grid;
+  grid-template-columns: 3fr 4fr;
+  column-gap: 8px;
+  color: #000;
+}
+.banner.parceiros img {
+  width: 100%;
+}
+.banner.parceiros span {
+  font-size: 12px;
+}
+.banner.whatsapp {
+  position: relative;
+}
+.banner.whatsapp img {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  width: 50px;
+}
+.banner .title {
+  font-family: Montserrat;
+  font-weight: bold;
+  display: block;
+}
+.banner .description {
+  font-family: Montserrat;
+  font-size: 12px;
+}
 .banner .tag {
   display: inline-block;
   font-family: "Open Sans";
 }
+.banner .play {
+  border-color: #fff;
+}
+.banner .play:after {
+  border-color: transparent transparent transparent #fff;
+}
 
 .banner-artwork {
-  order: -1;
   text-align: center;
-  width: 90%;
-  margin: 0 5%;
-}
-.banner-artwork.ba-ao-vivo {
-  margin-bottom: 25px;
+  width: 100%;
+  margin-right: 5%;
 }
 .banner-artwork p {
   margin: 0;
@@ -122,12 +182,8 @@ ul {
   width: 100%;
 }
 
-.banner.green .banner-artwork {
-  order: 1;
-}
-
 p.no-ar {
-  background-color: red;
+  background-color: #E31E25;
 }
 
 .parceiros-saiba-mais {
@@ -151,10 +207,8 @@ p.programa-no-ar {
 
 @media only screen and (min-width: 768px) {
   .banner {
-    flex-direction: row;
-    justify-content: space-between;
     text-align: left;
-    padding: 0 20% 20px 10%;
+    padding: 0 16px 20px 8px;
   }
   .banner .info {
     align-self: center;
@@ -169,7 +223,7 @@ p.programa-no-ar {
   .banner.orange {
     display: grid;
     grid-template-columns: 5fr 2fr;
-    padding: 0 10% 20px 10%;
+    padding: 0 8px 20px 8px;
     grid-column-gap: 20px;
   }
   .banner.orange .banner-artwork {
@@ -268,15 +322,22 @@ button .label, .button .label {
 }
 
 .wrapper.home {
-  padding: 0 10%;
+  padding: 0 8px;
+  margin-bottom: 15px;
 }
 
 .program-list {
-  text-align: center;
+  display: flex;
+  flex-flow: row wrap;
+  justify-content: space-between;
+}
+.program-list li {
+  width: 32%;
 }
 .program-list li {
   margin-left: 0;
-  margin-bottom: 10px;
+  margin-bottom: 2%;
+  box-shadow: 0 0 5px 0 #00B7C8;
 }
 .program-list li:hover .tint {
   background: rgba(0, 121, 133, 0.82);
@@ -322,16 +383,7 @@ button .label, .button .label {
 
 @media only screen and (min-width: 768px) {
   .wrapper.home {
-    padding: 0 20%;
-  }
-
-  .program-list {
-    display: flex;
-    flex-flow: row wrap;
-    justify-content: space-between;
-  }
-  .program-list li {
-    width: 30%;
+    padding: 0 16px;
   }
 }
 .wrapper.parceiros h2 {
@@ -1166,8 +1218,8 @@ iframe {
   }
 }
 footer {
-  background-color: #EC9F17;
   color: #fff;
+  height: 75px;
 }
 
 .live-player footer {
@@ -1175,7 +1227,7 @@ footer {
 }
 
 .footer-wrapper {
-  margin: 0 10% 0 10%;
+  margin: 0 8px 0 8px;
   padding: 30px 0 80px 0;
 }
 
@@ -1200,13 +1252,13 @@ footer {
 }
 
 .copyright-wrapper {
-  border-top: solid 1px #fff;
   font-size: 0.8em;
 }
 
 body {
   margin: 0px;
   width: 100%;
+  background-color: #052C31;
 }
 
 a {
