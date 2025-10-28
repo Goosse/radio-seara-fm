@@ -28,10 +28,15 @@ var stream = document.getElementById("player");
 var streamFullTime = 0 //in seconds
 var streamTitle = '';
 var scrubUpdater
+var currentPlayButtonId = null; // Track which button is currently active
 stream.volume = 0.5;
 stream.addEventListener("volumechange", function() {
-    //stream volume can be controlled, so show the volume slider.
-    removeClass("volume", "hidden");
+    // Show volume slider only on non-iOS devices
+    // iOS typically doesn't allow programmatic volume control
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    if (!isIOS) {
+        removeClass("volume", "hidden");
+    }
 });
 
 
@@ -59,14 +64,14 @@ if('mediaSession' in navigator) {
   
   // Action handlers for play/pause from lock screen and notifications
   navigator.mediaSession.setActionHandler('play', () => {
-    if (player.paused) {
-        playStream('bar-play-button');
+    if (player.paused && currentPlayButtonId) {
+        playStream(currentPlayButtonId);
       }
   });
   
   navigator.mediaSession.setActionHandler('pause', () => {
-    if (!player.paused) {
-        pauseStream('bar-play-button');
+    if (!player.paused && currentPlayButtonId) {
+        pauseStream(currentPlayButtonId);
       }
   });
 }    
@@ -75,8 +80,6 @@ if('mediaSession' in navigator) {
 
 function toggleLiveStream(playButton){
     if (stream.paused){
-        addClass(playButton.id, "playing");
-        
         // Reset Media Session to live stream metadata
         if ('mediaSession' in navigator) {
             navigator.mediaSession.metadata = new MediaMetadata({
@@ -97,12 +100,10 @@ function toggleLiveStream(playButton){
             });
         }
         
-        //  stream.load();
-        stream.play();
+        playStream(playButton.id);
     }
     else{
-        removeClass(playButton.id, "playing");
-        stream.pause();
+        pauseStream(playButton.id);
     }
 }
 
@@ -118,6 +119,7 @@ function playStream(buttonId){
     if (scrubUpdater) {
         clearInterval(scrubUpdater);
     }
+    currentPlayButtonId = buttonId; // Track active button for Media Session handlers
     addClass(buttonId, "playing");
     stream.play();
     scrubUpdater = window.setInterval(updateScrubber, 1000);
@@ -225,19 +227,24 @@ function updateSliderVariables(){  //On small screens, the scrubber and volume s
 var scrubberActiveRange;
 var scrubberContainer;
 var scrubberHandleDiameter;
+var scrubberRect;
 var analyticsTriggered = 0;
 
 if (document.getElementById("scrubber-slider")){
     scrubberActiveRange = document.getElementById("scrubber-active-range");
     scrubberContainer = document.getElementById("scrubber-slider");
     scrubberHandleDiameter = document.getElementById("scrubber-handle").getBoundingClientRect().width - 2;
+    scrubberRect = scrubberContainer.getBoundingClientRect();
 }
 
 function updateScrubber(){
-    let x = stream.currentTime / streamFullTime * (scrubberRect.width - scrubberHandleDiameter) + scrubberHandleDiameter
-    scrubberActiveRange.style.width = x + "px"
-    displayFormattedCurrentTime(stream.currentTime)
-    streamingAnalytics(stream.currentTime, streamFullTime)
+    // Only update scrubber if playing an episode (live stream has no scrubber)
+    if (streamFullTime > 0 && scrubberRect) {
+        let x = stream.currentTime / streamFullTime * (scrubberRect.width - scrubberHandleDiameter) + scrubberHandleDiameter
+        scrubberActiveRange.style.width = x + "px"
+        displayFormattedCurrentTime(stream.currentTime)
+        streamingAnalytics(stream.currentTime, streamFullTime)
+    }
 }
 
 function displayFormattedCurrentTime(seconds){
@@ -249,8 +256,6 @@ function displayFormattedCurrentTime(seconds){
     }
     currentTime.innerHTML = formattedTime
 }
-
-//var scrubberRect = scrubberContainer.getBoundingClientRect();
 
 if (document.getElementById("scrubber-slider")){
     var scrubberMouseIsDown = false;
