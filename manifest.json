@@ -456,8 +456,9 @@
        "sizes": "1024x1024"
      }
    ],
-    "start_url": "https://pwa--radio-seara.netlify.app",
+    "start_url": "/",
+    "scope": "/",
     "theme_color": "#052C31",
-    "background_color": "#fff",
-    "display": "standalone"
+    "background_color": "#052C31",
+    "display": "minimal-ui"
 }
