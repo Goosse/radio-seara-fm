@@ -4,23 +4,274 @@ const registerServiceWorker = async () => {
     try {
         const thisScript = document.currentScript;
         let buildTag = thisScript.getAttribute('data-buildTag');
-        console.log("data-buildTag: " + buildTag);
-        const registration = await navigator.serviceWorker.register("/sw.js?build-tag=" + buildTag, {
-        scope: "/",
-      });
-      if (registration.installing) {
-        console.log("Service worker installing");
-      } else if (registration.waiting) {
-        console.log("Service worker installed");
-      } else if (registration.active) {
-        console.log("Service worker active");
-      }
+        await navigator.serviceWorker.register("/sw.js?build-tag=" + buildTag, {
+            scope: "/",
+        });
     } catch (error) {
-      console.error(`Registration failed with ${error}`);
+      console.error(`Service worker registration failed:`, error);
     }
   }
 };
 registerServiceWorker();
+
+//Mark: SPA Navigation (Persistent Player)
+function isInternalLink(url) {
+    try {
+        const link = new URL(url, window.location.origin);
+        // Internal if same origin
+        return link.origin === window.location.origin;
+    } catch {
+        return false;
+    }
+}
+
+async function navigateToPage(url, addToHistory = true) {
+    try {
+        document.body.classList.add('navigating');
+        
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Page not found');
+        
+        const html = await response.text();
+        const parser = new DOMParser();
+        const newDoc = parser.parseFromString(html, 'text/html');
+        
+        const newContent = newDoc.getElementById('page-content');
+        if (!newContent) throw new Error('No page-content found');
+        
+        const currentContent = document.getElementById('page-content');
+        currentContent.innerHTML = newContent.innerHTML;
+        currentContent.setAttribute('data-page-type', newContent.getAttribute('data-page-type') || '');
+        
+        document.title = newDoc.title;
+        document.body.className = newDoc.body.className;
+        
+        if (addToHistory) {
+            history.pushState({ url: url }, '', url);
+        }
+        
+        window.scrollTo(0, 0);
+        document.body.classList.remove('navigating');
+        initializePage();
+        
+    } catch (error) {
+        window.location.href = url;
+    }
+}
+
+// Intercept all internal link clicks
+document.addEventListener('DOMContentLoaded', () => {
+    document.addEventListener('click', (e) => {
+        const link = e.target.closest('a');
+        
+        if (link && link.href && isInternalLink(link.href) && !link.target && !link.download) {
+            e.preventDefault();
+            navigateToPage(link.href);
+        }
+    });
+    initializePage();
+});
+
+// Handle browser back/forward buttons
+window.addEventListener('popstate', (e) => {
+    if (e.state && e.state.url) {
+        navigateToPage(e.state.url, false);
+    } else {
+        navigateToPage(window.location.pathname, false);
+    }
+    updateBackButtonVisibility();
+});
+
+// Initialize with current URL in history
+history.replaceState({ url: window.location.pathname }, '', window.location.pathname);
+updateBackButtonVisibility();
+
+const STREAM_CONFIG = {
+    '102': {
+        url: 'https://radioseara.fm/stream102',
+        name: 'Nova Russas 102,7',
+        coords: { lat: -4.707070, lon: -40.563689 }
+    },
+    '104': {
+        url: 'https://radioseara.fm/stream104',
+        name: 'Ibiapina 104,7',
+        coords: { lat: -3.944082, lon: -40.849463 }
+    }
+};
+
+const LIVE_STREAM_ARTWORK = 'https://radioseara.fm/recursos/capas/semmarca/ao-vivo.webp';
+let currentStreamId = null; // Track active stream ID ('102' or '104')
+
+// Calculate distance between two coordinates using Haversine formula
+function calculateDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371; // Earth's radius in kilometers
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+}
+
+// Get user location via IP and determine closest stream
+async function determineClosestStream() {
+    // Check localStorage first
+    const savedStreamId = localStorage.getItem('preferredStreamId');
+    if (savedStreamId && (savedStreamId === '102' || savedStreamId === '104')) {
+        return savedStreamId;
+    }
+
+    try {
+        // Use ipapi.co for IP-based geolocation (free tier, no API key needed)
+        const response = await fetch('https://ipapi.co/json/');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        
+        if (data.latitude && data.longitude) {
+            const userLat = data.latitude;
+            const userLon = data.longitude;
+            
+            // Calculate distances to both cities
+            const dist102 = calculateDistance(
+                userLat, userLon,
+                STREAM_CONFIG['102'].coords.lat,
+                STREAM_CONFIG['102'].coords.lon
+            );
+            const dist104 = calculateDistance(
+                userLat, userLon,
+                STREAM_CONFIG['104'].coords.lat,
+                STREAM_CONFIG['104'].coords.lon
+            );
+            
+            // Return closest stream
+            const closestStreamId = dist102 < dist104 ? '102' : '104';
+            localStorage.setItem('preferredStreamId', closestStreamId);
+            return closestStreamId;
+        }
+    } catch (error) {
+        console.warn('Geolocation failed, defaulting to stream 102:', error);
+    }
+    
+    // Default to stream102 if geolocation fails
+    return '102';
+}
+
+function initializePage(){
+    updateLiveBanner();
+    ensureLiveStreamSource();
+    updateBackButtonVisibility();
+}
+
+// Show/hide back button based on current URL
+function updateBackButtonVisibility() {
+    const backButton = document.getElementById('back-button');
+    if (!backButton) return;
+    
+    const currentPath = window.location.pathname;
+    // Show back button if not on home page
+    if (currentPath === '/' || currentPath === '') {
+        addClass('back-button', 'hidden');
+    } else {
+        removeClass('back-button', 'hidden');
+    }
+}
+
+const liveProgrammingSchedule = [
+    {
+        title: 'Razão Para Viver',
+        description: 'Compromisso com a excelência na comunicação da verdade bíblica e sua prática.',
+        days: [1, 2, 3, 4, 5], // Monday - Friday
+        start: '07:00',
+        end: '08:00'
+    },
+    {
+        title: 'Jornal Seara',
+        description: 'As principais notícias da região com conteúdo cristão e compromisso com a verdade.',
+        days: [1, 2, 3, 4, 5],
+        start: '12:00',
+        end: '14:00'
+    },
+    {
+        title: 'Tarde Musical',
+        description: 'Louvores que edificam e momentos de reflexão para a sua tarde.',
+        days: [1, 2, 3, 4, 5],
+        start: '14:00',
+        end: '17:00'
+    },
+    {
+        title: 'Programação Ao Vivo',
+        description: 'Louvores, mensagens e participação dos ouvintes com a equipe Rádio Seara.',
+        days: [0, 6], // Weekend
+        start: '06:00',
+        end: '21:00'
+    }
+];
+
+const defaultLiveProgram = {
+    title: 'Rádio Seara Ao Vivo',
+    description: 'Acompanhe a transmissão ao vivo e fique por dentro da nossa programação.'
+};
+
+async function ensureLiveStreamSource(){
+    if (!stream) return;
+    const sourceEl = stream.getElementsByTagName('source')[0];
+    if (!sourceEl) return;
+    
+    const currentSrc = sourceEl.getAttribute('src');
+    
+    // Detect which stream is currently set (if any)
+    if (currentSrc) {
+        if (currentSrc.includes('stream102')) {
+            currentStreamId = '102';
+        } else if (currentSrc.includes('stream104')) {
+            currentStreamId = '104';
+        }
+    }
+    
+    // Only set default if no source is set and we're not already playing
+    if (!currentSrc && !currentStreamId) {
+        const defaultStreamId = await determineClosestStream();
+        currentStreamId = defaultStreamId;
+        sourceEl.setAttribute('src', STREAM_CONFIG[defaultStreamId].url);
+        stream.load();
+    }
+}
+
+function timeToMinutes(time){
+    const [hours, minutes] = time.split(':').map(Number);
+    return hours * 60 + minutes;
+}
+
+function findProgramFor(date){
+    const day = date.getDay(); // 0 - Sunday
+    const currentMinutes = date.getHours() * 60 + date.getMinutes();
+
+    return liveProgrammingSchedule.find(program => {
+        if(!program.days.includes(day)){
+            return false;
+        }
+        const start = timeToMinutes(program.start);
+        const end = timeToMinutes(program.end);
+        if(end < start){
+            // Overnight program (e.g., 22:00 - 02:00)
+            return currentMinutes >= start || currentMinutes < end;
+        }
+        return currentMinutes >= start && currentMinutes < end;
+    }) || defaultLiveProgram;
+}
+
+function updateLiveBanner(now = new Date()){
+    const titleEl = document.getElementById('live-program-title');
+    const descriptionEl = document.getElementById('live-program-description');
+    if(!titleEl || !descriptionEl){
+        return;
+    }
+
+    const program = findProgramFor(now);
+    titleEl.textContent = program.title;
+    descriptionEl.textContent = program.description;
+}
 
 //Mark: Player Controls
 
@@ -28,7 +279,6 @@ var stream = document.getElementById("player");
 var streamFullTime = 0 //in seconds
 var streamTitle = '';
 var scrubUpdater
-var currentPlayButtonId = null; // Track which button is currently active
 stream.volume = 0.5;
 stream.addEventListener("volumechange", function() {
     // Show volume slider only on non-iOS devices
@@ -64,69 +314,161 @@ if('mediaSession' in navigator) {
   
   // Action handlers for play/pause from lock screen and notifications
   navigator.mediaSession.setActionHandler('play', () => {
-    if (player.paused && currentPlayButtonId) {
-        playStream(currentPlayButtonId);
+    if (player.paused) {
+        playStream();
       }
   });
   
   navigator.mediaSession.setActionHandler('pause', () => {
-    if (!player.paused && currentPlayButtonId) {
-        pauseStream(currentPlayButtonId);
+    if (!player.paused) {
+        pauseStream();
       }
   });
 }    
     
 
 
-function toggleLiveStream(playButton){
-    if (stream.paused){
-        // Reset Media Session to live stream metadata
-        if ('mediaSession' in navigator) {
-            navigator.mediaSession.metadata = new MediaMetadata({
-                title: 'Rádio Seara',
-                artist: 'Ao Vivo',
-                artwork: [
-                    {
-                        src: 'https://radioseara.fm/recursos/capas/semmarca/ao-vivo.webp',
-                        sizes: '256x256',
-                        type: 'image/webp'
-                    },
-                    {
-                        src: 'https://radioseara.fm/recursos/capas/semmarca/ao-vivo.webp',
-                        sizes: '512x512',
-                        type: 'image/webp'
-                    }
-                ]
-            });
+async function toggleLiveStream(playButton, streamId = null){
+    const buttonId = playButton && playButton.id ? playButton.id : 'live-stream-play-button';
+    if (!stream) return;
+
+    const sourceEl = stream.getElementsByTagName('source')[0];
+    if (!sourceEl) return;
+
+    // Determine which stream to use
+    let targetStreamId = streamId;
+    if (!targetStreamId) {
+        if (currentStreamId) {
+            targetStreamId = currentStreamId;
+        } else {
+            targetStreamId = await determineClosestStream();
+        }
+    }
+
+    const currentSrc = sourceEl.getAttribute('src');
+    const targetStreamUrl = STREAM_CONFIG[targetStreamId].url;
+    const switchingToLive = !currentSrc || (!currentSrc.includes('stream102') && !currentSrc.includes('stream104'));
+    const switchingStream = currentSrc !== targetStreamUrl;
+    // Reload if switching streams, or if currentStreamId doesn't match (including when it's null)
+    const needsReload = switchingToLive || switchingStream || !currentStreamId || currentStreamId !== targetStreamId;
+
+    if (needsReload) {
+        // Pause if currently playing
+        const wasPlaying = !stream.paused;
+        if (wasPlaying) {
+            stream.pause();
         }
         
-        playStream(playButton.id);
+        sourceEl.setAttribute('src', targetStreamUrl);
+        currentStreamId = targetStreamId;
+        streamFullTime = 0;
+        streamTitle = 'Rádio Seara Ao Vivo';
+        stream.load();
+        
+        // Resume if was playing
+        if (wasPlaying) {
+            stream.play().catch(() => {});
+        }
     }
-    else{
-        pauseStream(playButton.id);
+
+    // Always update UI when playing live stream (even if source was already set)
+    if (!currentStreamId || currentStreamId !== targetStreamId) {
+        currentStreamId = targetStreamId;
     }
+    updateLiveStreamUI(targetStreamId);
+
+    const shouldPlay = stream.paused || needsReload;
+
+    if (shouldPlay) {
+        removeClass("bar-player-wrapper", "closed");
+        showStreamToggle();
+        analyticsTriggered = 0;
+        playStream();
+    } else {
+        pauseStream();
+    }
+}
+
+// Switch between streams (called from toggle buttons)
+function switchStream(streamId) {
+    if (currentStreamId === streamId) return;
+    
+    // Save preference to localStorage
+    localStorage.setItem('preferredStreamId', streamId);
+    
+    const wasPlaying = !stream.paused;
+    toggleLiveStream(null, streamId);
+    
+    // If was playing, ensure it continues playing
+    if (wasPlaying && stream.paused) {
+        stream.play().catch(() => {});
+    }
+}
+
+// Update UI elements for live stream
+function updateLiveStreamUI(streamId) {
+    const config = STREAM_CONFIG[streamId];
+    const playerTitle = document.getElementById("bar-player-title");
+    const playerSubtitle = document.getElementById("bar-player-subtitle");
+    const totalTime = document.getElementById("total-time");
+    const artwork = document.getElementById("bar-player-artwork");
+
+    if (playerTitle) {
+        playerTitle.textContent = "Rádio Seara Ao Vivo";
+    }
+    if (playerSubtitle) {
+        playerSubtitle.textContent = config.name;
+    }
+    if (totalTime) {
+        totalTime.textContent = "--:--";
+    }
+    if (artwork) {
+        artwork.setAttribute('src', LIVE_STREAM_ARTWORK);
+    }
+
+    // Update Media Session metadata
+    if ('mediaSession' in navigator) {
+        navigator.mediaSession.metadata = new MediaMetadata({
+            title: 'Rádio Seara',
+            artist: config.name,
+            artwork: [
+                {
+                    src: LIVE_STREAM_ARTWORK,
+                    sizes: '256x256',
+                    type: 'image/webp'
+                },
+                {
+                    src: LIVE_STREAM_ARTWORK,
+                    sizes: '512x512',
+                    type: 'image/webp'
+                }
+            ]
+        });
+    }
+    
+    // Update toggle button states
+    updateStreamToggleUI(streamId);
 }
 
 function toggleStream(playButton){
     if (stream.paused){
-        playStream(playButton.id)
+        playStream()
     }
     else{
-        pauseStream(playButton.id)
+        pauseStream()
     }
 }
-function playStream(buttonId){
+function playStream(){
     if (scrubUpdater) {
         clearInterval(scrubUpdater);
     }
-    currentPlayButtonId = buttonId; // Track active button for Media Session handlers
-    addClass(buttonId, "playing");
-    stream.play();
+    addClass("bar-play-button", "playing");
+    stream.play().catch(() => {});
     scrubUpdater = window.setInterval(updateScrubber, 1000);
 }
 
-function pauseStream(buttonId){
-    removeClass(buttonId, "playing");
+function pauseStream(){
+    removeClass("bar-play-button", "playing");
     stream.pause();
     clearInterval(scrubUpdater)
 }
@@ -134,18 +476,19 @@ function pauseStream(buttonId){
 // Helper function to update Media Session metadata for episodes
 function updateMediaSessionForEpisode(title, programName, artworkUrl) {
     if ('mediaSession' in navigator) {
+        const resolvedArtwork = artworkUrl && artworkUrl.trim() !== "" ? artworkUrl : LIVE_STREAM_ARTWORK;
         navigator.mediaSession.metadata = new MediaMetadata({
             title: title,
             artist: programName,
             album: 'Rádio Seara',
             artwork: [
                 {
-                    src: artworkUrl,
+                    src: resolvedArtwork,
                     sizes: '256x256',
                     type: 'image/webp'
                 },
                 {
-                    src: artworkUrl,
+                    src: resolvedArtwork,
                     sizes: '512x512',
                     type: 'image/webp'
                 }
@@ -159,14 +502,71 @@ function playEpisodeWithImage(audioUrl, title, time, programName, imageUrl){
     playEpisode(audioUrl, title, time, programName, imageUrl)
 }
 
+function showStreamToggle() {
+    const scrubber = document.getElementById("scrubber");
+    const toggleWrapper = document.getElementById("stream-toggle-wrapper");
+    if (scrubber) {
+        addClass("scrubber", "hidden");
+    }
+    if (toggleWrapper) {
+        removeClass("stream-toggle-wrapper", "hidden");
+    }
+}
+
+function showScrubber() {
+    const scrubber = document.getElementById("scrubber");
+    const toggleWrapper = document.getElementById("stream-toggle-wrapper");
+    if (scrubber) {
+        removeClass("scrubber", "hidden");
+    }
+    if (toggleWrapper) {
+        addClass("stream-toggle-wrapper", "hidden");
+    }
+}
+
+// Update toggle button active states
+function updateStreamToggleUI(activeStreamId) {
+    const btn102 = document.getElementById("stream-toggle-102");
+    const btn104 = document.getElementById("stream-toggle-104");
+    
+    if (btn102) {
+        if (activeStreamId === '102') {
+            btn102.classList.add('active');
+        } else {
+            btn102.classList.remove('active');
+        }
+    }
+    
+    if (btn104) {
+        if (activeStreamId === '104') {
+            btn104.classList.add('active');
+        } else {
+            btn104.classList.remove('active');
+        }
+    }
+}
+
 function playEpisode(audioUrl, title, time, programName, imageUrl){
     removeClass("bar-player-wrapper", "closed");
-    var player = document.getElementById("player")
-    var playerTitle = document.getElementById("bar-player-title")
-    var totalTime = document.getElementById("total-time")
+    var player = document.getElementById("player");
+    var playerTitle = document.getElementById("bar-player-title");
+    var playerSubtitle = document.getElementById("bar-player-subtitle");
+    var totalTime = document.getElementById("total-time");
+    var artwork = document.getElementById("bar-player-artwork");
+    
+    if (!player || !playerTitle || !totalTime) {
+        console.error('Player elements not found');
+        return;
+    }
 
-    player.getElementsByTagName('source')[0].setAttribute('src', audioUrl)
-    playerTitle.innerHTML = title
+    // Reset stream ID when playing episode
+    currentStreamId = null;
+    
+    player.getElementsByTagName('source')[0].setAttribute('src', audioUrl);
+    playerTitle.innerHTML = title;
+    if (playerSubtitle) {
+        playerSubtitle.textContent = programName || '';
+    }
     var formattedTime = new Date(time * 1000).toISOString().substr(11, 8)
     if (formattedTime.substr(0,2) == "00") {
         formattedTime = formattedTime.substr(3, formattedTime.length - 3)
@@ -176,12 +576,23 @@ function playEpisode(audioUrl, title, time, programName, imageUrl){
     streamTitle = title;
     analyticsTriggered = 0;
     updateSliderVariables();  //The episode title can change the scrubber slider's length.
+
+    if (artwork) {
+        if (imageUrl && imageUrl.trim() !== "") {
+            artwork.setAttribute('src', imageUrl);
+        } else {
+            artwork.setAttribute('src', LIVE_STREAM_ARTWORK);
+        }
+    }
+    
+    // Show scrubber for episodes
+    showScrubber();
     
     // Update Media Session metadata for lock screen
     updateMediaSessionForEpisode(title, programName, imageUrl);
     
     stream.load();
-    playStream("bar-play-button")
+    playStream()
 }
 
 function minimizePlayer(){
@@ -210,7 +621,7 @@ function closePlayer(button){
         minimizePlayer()
     }else{
         button.parentElement.classList.add("closed");
-        pauseStream("bar-play-button");
+        pauseStream();
     }
 }
 
@@ -479,11 +890,17 @@ function enableScrolling(){
 }
 
 function addClass(id, newclass){
-    document.getElementById(id).classList.add(newclass);
+    const element = document.getElementById(id);
+    if (element) {
+        element.classList.add(newclass);
+    }
 }
 
 function removeClass(id, oldclass){
-    document.getElementById(id).classList.remove(oldclass);
+    const element = document.getElementById(id);
+    if (element) {
+        element.classList.remove(oldclass);
+    }
 }
 
 function streamingAnalytics(currentTime, fullTime){
