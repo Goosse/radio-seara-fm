@@ -1,34 +1,43 @@
-//Mark: Debug Logging
-// Configure your log collection endpoint here
-// Options:
-// 1. Same origin: window.location.origin + '/api/debug-logs' (requires server endpoint)
-// 2. External service: 'https://your-logging-service.com/api/logs' (requires CORS)
-// 3. Disable: null or '' (logs only stored in localStorage)
-const LOG_COLLECTION_ENDPOINT = window.location.origin + '/api/debug-logs';
+//Mark: Debug Logging with Sentry
+// Configure your Sentry DSN here (get it from https://sentry.io)
+const SENTRY_DSN = 'https://57591e4d3698015d44d524db1aa52f2d@o4510596844879872.ingest.us.sentry.io/4510596854579200'; // Set your Sentry DSN here, e.g., 'https://xxxxx@xxxxx.ingest.sentry.io/xxxxx'
 const MAX_LOG_ENTRIES = 1000; // Limit localStorage size
-const LOG_BATCH_SIZE = 50; // Send logs in batches
-const LOG_SEND_INTERVAL = 30000; // Send logs every 30 seconds
 
-let logQueue = [];
-let lastLogSend = 0;
 let sessionId = localStorage.getItem('debugSessionId') || 'session-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
 if (!localStorage.getItem('debugSessionId')) {
     localStorage.setItem('debugSessionId', sessionId);
 }
 
-// Get device/browser info for identification
-function getDeviceInfo() {
-    return {
+// Initialize Sentry if DSN is configured
+if (SENTRY_DSN && window.Sentry) {
+    window.Sentry.init({
+        dsn: SENTRY_DSN,
+        environment: window.location.hostname.includes('netlify.app') ? 'preview' : 'production',
+        tracesSampleRate: 1.0, // Capture 100% of transactions for debugging
+        beforeSend(event, hint) {
+            // Add session ID to all events
+            event.tags = event.tags || {};
+            event.tags.sessionId = sessionId;
+            return event;
+        }
+    });
+    
+    // Set user context
+    window.Sentry.setUser({
+        id: sessionId,
+        username: `session-${sessionId}`
+    });
+    
+    // Set device context
+    window.Sentry.setContext('device', {
         userAgent: navigator.userAgent,
         platform: navigator.platform,
         language: navigator.language,
         screenWidth: window.screen.width,
         screenHeight: window.screen.height,
         connectionType: navigator.connection?.effectiveType || 'unknown',
-        sessionId: sessionId,
-        url: window.location.href,
-        timestamp: Date.now()
-    };
+        url: window.location.href
+    });
 }
 
 function debugLog(location, message, data, hypothesisId) {
@@ -39,12 +48,11 @@ function debugLog(location, message, data, hypothesisId) {
         timestamp: Date.now(), 
         sessionId: sessionId, 
         runId: 'run1', 
-        hypothesisId,
-        deviceInfo: getDeviceInfo()
+        hypothesisId
     };
     console.log('[DEBUG]', logData); // Console fallback
     
-    // Store in localStorage
+    // Store in localStorage (backup)
     try {
         let logs = JSON.parse(localStorage.getItem('debugLogs') || '[]');
         logs.push(logData);
@@ -57,68 +65,35 @@ function debugLog(location, message, data, hypothesisId) {
         console.warn('[DEBUG] localStorage write failed:', e);
     }
     
-    // Add to queue for automatic sending
-    logQueue.push(logData);
-    
-    // Send if queue is full or enough time has passed
-    const now = Date.now();
-    if (logQueue.length >= LOG_BATCH_SIZE || (now - lastLogSend) >= LOG_SEND_INTERVAL) {
-        sendLogBatch();
-    }
-}
-
-// Send batched logs to server
-function sendLogBatch() {
-    if (logQueue.length === 0 || !LOG_COLLECTION_ENDPOINT) return;
-    
-    const logsToSend = [...logQueue];
-    logQueue = []; // Clear queue
-    lastLogSend = Date.now();
-    
-    fetch(LOG_COLLECTION_ENDPOINT, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            logs: logsToSend,
-            deviceInfo: getDeviceInfo(),
-            batchSize: logsToSend.length,
-            timestamp: Date.now()
-        })
-    }).catch((err) => {
-        // If send fails, put logs back in queue (up to a limit)
-        if (logQueue.length < MAX_LOG_ENTRIES) {
-            logQueue = [...logsToSend, ...logQueue].slice(0, MAX_LOG_ENTRIES);
-        }
-        console.warn('[DEBUG] Log send failed, queued for retry:', err);
-    });
-}
-
-// Send logs periodically even if queue isn't full
-setInterval(() => {
-    if (logQueue.length > 0) {
-        sendLogBatch();
-    }
-}, LOG_SEND_INTERVAL);
-
-// Send logs on page unload
-window.addEventListener('beforeunload', () => {
-    if (logQueue.length > 0) {
-        // Use sendBeacon for more reliable delivery on page unload
-        if (navigator.sendBeacon && LOG_COLLECTION_ENDPOINT) {
-            const data = JSON.stringify({
-                logs: logQueue,
-                deviceInfo: getDeviceInfo(),
-                batchSize: logQueue.length,
-                timestamp: Date.now()
+    // Send to Sentry if available
+    if (window.Sentry && SENTRY_DSN) {
+        // Use Sentry's breadcrumb for non-error logs
+        window.Sentry.addBreadcrumb({
+            category: 'debug',
+            message: message,
+            level: 'info',
+            data: {
+                location: location,
+                hypothesisId: hypothesisId,
+                ...data
+            },
+            timestamp: Date.now() / 1000
+        });
+        
+        // For important events, also send as event
+        if (message.includes('error') || message.includes('stalled') || message.includes('rejected')) {
+            window.Sentry.captureMessage(message, {
+                level: 'warning',
+                tags: {
+                    location: location,
+                    hypothesisId: hypothesisId,
+                    sessionId: sessionId
+                },
+                extra: data
             });
-            navigator.sendBeacon(LOG_COLLECTION_ENDPOINT, new Blob([data], {type: 'application/json'}));
-        } else {
-            sendLogBatch();
         }
     }
-});
+}
 
 // Export function to retrieve logs (call from console: getDebugLogs())
 window.getDebugLogs = function() {
@@ -674,7 +649,7 @@ async function toggleLiveStream(playButton, streamId = null){
         const wasPlaying = !stream.paused;
         if (wasPlaying) {
         stream.pause();
-        }
+    }
         
         sourceEl.setAttribute('src', targetStreamUrl);
         currentStreamId = targetStreamId;
