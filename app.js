@@ -159,6 +159,26 @@ function sendSentryBatch() {
         if (importantLogs.length > 0) {
             // Send important logs as individual events
             importantLogs.forEach(log => {
+                // Serialize data properly
+                const serializedData = {};
+                if (log.data && typeof log.data === 'object') {
+                    try {
+                        Object.keys(log.data).forEach(key => {
+                            const value = log.data[key];
+                            if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+                                serializedData[key] = JSON.parse(JSON.stringify(value));
+                            } else {
+                                serializedData[key] = value;
+                            }
+                        });
+                    } catch (e) {
+                        serializedData._serializationError = e.message;
+                        serializedData._rawData = String(log.data);
+                    }
+                } else {
+                    serializedData = log.data;
+                }
+                
                 window.Sentry.captureMessage(`[${log.hypothesisId}] ${log.message}`, {
                     level: 'warning',
                     tags: {
@@ -168,8 +188,13 @@ function sendSentryBatch() {
                         logType: 'debug'
                     },
                     extra: {
-                        ...log.data,
-                        timestamp: log.timestamp
+                        ...serializedData,
+                        timestamp: log.timestamp,
+                        fullLog: {
+                            message: log.message,
+                            location: log.location,
+                            hypothesisId: log.hypothesisId
+                        }
                     }
                 });
             });
@@ -183,12 +208,36 @@ function sendSentryBatch() {
                     batchSize: logsToSend.length
                 },
                 extra: {
-                    logs: logsToSend.map(log => ({
-                        message: log.message,
-                        location: log.location,
-                        hypothesisId: log.hypothesisId,
-                        data: log.data
-                    }))
+                    logs: logsToSend.map(log => {
+                        // Properly serialize the data object
+                        const serializedData = {};
+                        if (log.data && typeof log.data === 'object') {
+                            try {
+                                // Deep clone and serialize the data object
+                                Object.keys(log.data).forEach(key => {
+                                    const value = log.data[key];
+                                    if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+                                        serializedData[key] = JSON.parse(JSON.stringify(value));
+                                    } else {
+                                        serializedData[key] = value;
+                                    }
+                                });
+                            } catch (e) {
+                                serializedData._serializationError = e.message;
+                                serializedData._rawData = String(log.data);
+                            }
+                        } else {
+                            serializedData = log.data;
+                        }
+                        
+                        return {
+                            message: log.message,
+                            location: log.location,
+                            hypothesisId: log.hypothesisId,
+                            timestamp: log.timestamp,
+                            data: serializedData
+                        };
+                    })
                 }
             });
         }
