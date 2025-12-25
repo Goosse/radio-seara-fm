@@ -1,3 +1,235 @@
+//Mark: Debug Logging
+// Configure your log collection endpoint here
+// Options:
+// 1. Same origin: window.location.origin + '/api/debug-logs' (requires server endpoint)
+// 2. External service: 'https://your-logging-service.com/api/logs' (requires CORS)
+// 3. Disable: null or '' (logs only stored in localStorage)
+const LOG_COLLECTION_ENDPOINT = window.location.origin + '/api/debug-logs';
+const MAX_LOG_ENTRIES = 1000; // Limit localStorage size
+const LOG_BATCH_SIZE = 50; // Send logs in batches
+const LOG_SEND_INTERVAL = 30000; // Send logs every 30 seconds
+
+let logQueue = [];
+let lastLogSend = 0;
+let sessionId = localStorage.getItem('debugSessionId') || 'session-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+if (!localStorage.getItem('debugSessionId')) {
+    localStorage.setItem('debugSessionId', sessionId);
+}
+
+// Get device/browser info for identification
+function getDeviceInfo() {
+    return {
+        userAgent: navigator.userAgent,
+        platform: navigator.platform,
+        language: navigator.language,
+        screenWidth: window.screen.width,
+        screenHeight: window.screen.height,
+        connectionType: navigator.connection?.effectiveType || 'unknown',
+        sessionId: sessionId,
+        url: window.location.href,
+        timestamp: Date.now()
+    };
+}
+
+function debugLog(location, message, data, hypothesisId) {
+    const logData = {
+        location, 
+        message, 
+        data, 
+        timestamp: Date.now(), 
+        sessionId: sessionId, 
+        runId: 'run1', 
+        hypothesisId,
+        deviceInfo: getDeviceInfo()
+    };
+    console.log('[DEBUG]', logData); // Console fallback
+    
+    // Store in localStorage
+    try {
+        let logs = JSON.parse(localStorage.getItem('debugLogs') || '[]');
+        logs.push(logData);
+        // Keep only last MAX_LOG_ENTRIES
+        if (logs.length > MAX_LOG_ENTRIES) {
+            logs = logs.slice(-MAX_LOG_ENTRIES);
+        }
+        localStorage.setItem('debugLogs', JSON.stringify(logs));
+    } catch (e) {
+        console.warn('[DEBUG] localStorage write failed:', e);
+    }
+    
+    // Add to queue for automatic sending
+    logQueue.push(logData);
+    
+    // Send if queue is full or enough time has passed
+    const now = Date.now();
+    if (logQueue.length >= LOG_BATCH_SIZE || (now - lastLogSend) >= LOG_SEND_INTERVAL) {
+        sendLogBatch();
+    }
+}
+
+// Send batched logs to server
+function sendLogBatch() {
+    if (logQueue.length === 0 || !LOG_COLLECTION_ENDPOINT) return;
+    
+    const logsToSend = [...logQueue];
+    logQueue = []; // Clear queue
+    lastLogSend = Date.now();
+    
+    fetch(LOG_COLLECTION_ENDPOINT, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            logs: logsToSend,
+            deviceInfo: getDeviceInfo(),
+            batchSize: logsToSend.length,
+            timestamp: Date.now()
+        })
+    }).catch((err) => {
+        // If send fails, put logs back in queue (up to a limit)
+        if (logQueue.length < MAX_LOG_ENTRIES) {
+            logQueue = [...logsToSend, ...logQueue].slice(0, MAX_LOG_ENTRIES);
+        }
+        console.warn('[DEBUG] Log send failed, queued for retry:', err);
+    });
+}
+
+// Send logs periodically even if queue isn't full
+setInterval(() => {
+    if (logQueue.length > 0) {
+        sendLogBatch();
+    }
+}, LOG_SEND_INTERVAL);
+
+// Send logs on page unload
+window.addEventListener('beforeunload', () => {
+    if (logQueue.length > 0) {
+        // Use sendBeacon for more reliable delivery on page unload
+        if (navigator.sendBeacon && LOG_COLLECTION_ENDPOINT) {
+            const data = JSON.stringify({
+                logs: logQueue,
+                deviceInfo: getDeviceInfo(),
+                batchSize: logQueue.length,
+                timestamp: Date.now()
+            });
+            navigator.sendBeacon(LOG_COLLECTION_ENDPOINT, new Blob([data], {type: 'application/json'}));
+        } else {
+            sendLogBatch();
+        }
+    }
+});
+
+// Export function to retrieve logs (call from console: getDebugLogs())
+window.getDebugLogs = function() {
+    try {
+        const logs = JSON.parse(localStorage.getItem('debugLogs') || '[]');
+        console.log(`Retrieved ${logs.length} log entries`);
+        return logs;
+    } catch (e) {
+        console.error('Failed to retrieve logs:', e);
+        return [];
+    }
+};
+
+// Export function to clear logs (call from console: clearDebugLogs())
+window.clearDebugLogs = function() {
+    localStorage.removeItem('debugLogs');
+    console.log('Debug logs cleared');
+};
+
+// Export function to analyze logs for stream stop issues
+window.analyzeDebugLogs = function() {
+    try {
+        const logs = JSON.parse(localStorage.getItem('debugLogs') || '[]');
+        console.log(`Analyzing ${logs.length} log entries...`);
+        
+        // Find all periodic checks and look for state changes
+        const periodicChecks = logs.filter(log => log.message === 'Periodic audio state check');
+        const stalledEvents = logs.filter(log => log.message === 'Audio stalled event');
+        const errorEvents = logs.filter(log => log.message === 'Audio error event');
+        const waitingEvents = logs.filter(log => log.message === 'Audio waiting event');
+        
+        console.log('\n=== Analysis Results ===');
+        console.log(`Periodic checks: ${periodicChecks.length}`);
+        console.log(`Stalled events: ${stalledEvents.length}`);
+        console.log(`Error events: ${errorEvents.length}`);
+        console.log(`Waiting events: ${waitingEvents.length}`);
+        
+        // Find transitions from playing to not playing
+        let lastPlayingState = null;
+        const stateTransitions = [];
+        periodicChecks.forEach((log, index) => {
+            const wasPlaying = !log.data.paused;
+            if (lastPlayingState !== null && lastPlayingState !== wasPlaying) {
+                stateTransitions.push({
+                    index: index,
+                    timestamp: log.timestamp,
+                    from: lastPlayingState ? 'playing' : 'paused',
+                    to: wasPlaying ? 'playing' : 'paused',
+                    readyState: log.data.readyState,
+                    networkState: log.data.networkState,
+                    error: log.data.error
+                });
+            }
+            lastPlayingState = wasPlaying;
+        });
+        
+        if (stateTransitions.length > 0) {
+            console.log('\n=== State Transitions ===');
+            stateTransitions.forEach(t => {
+                console.log(`Transition ${t.from} -> ${t.to} at ${new Date(t.timestamp).toLocaleTimeString()}, readyState: ${t.readyState}, networkState: ${t.networkState}`);
+            });
+        }
+        
+        // Check for stalled events with details
+        if (stalledEvents.length > 0) {
+            console.log('\n=== Stalled Events ===');
+            stalledEvents.forEach((log, i) => {
+                console.log(`Stalled event ${i+1} at ${new Date(log.timestamp).toLocaleTimeString()}:`, log.data);
+            });
+        }
+        
+        // Check for error events
+        if (errorEvents.length > 0) {
+            console.log('\n=== Error Events ===');
+            errorEvents.forEach((log, i) => {
+                console.log(`Error event ${i+1} at ${new Date(log.timestamp).toLocaleTimeString()}:`, log.data);
+            });
+        }
+        
+        // Find cases where paused=false but readyState/networkState suggest issues
+        const suspiciousStates = periodicChecks.filter(log => {
+            return !log.data.paused && 
+                   (log.data.readyState < 3 || log.data.networkState !== 2);
+        });
+        
+        if (suspiciousStates.length > 0) {
+            console.log('\n=== Suspicious States (playing but not ready) ===');
+            suspiciousStates.slice(0, 5).forEach(log => {
+                console.log(`At ${new Date(log.timestamp).toLocaleTimeString()}:`, {
+                    paused: log.data.paused,
+                    readyState: log.data.readyState,
+                    networkState: log.data.networkState,
+                    error: log.data.error
+                });
+            });
+        }
+        
+        return {
+            totalLogs: logs.length,
+            periodicChecks: periodicChecks.length,
+            stalledEvents: stalledEvents.length,
+            errorEvents: errorEvents.length,
+            stateTransitions: stateTransitions,
+            suspiciousStates: suspiciousStates.length
+        };
+    } catch (e) {
+        console.error('Failed to analyze logs:', e);
+        return null;
+    }
+};
+
 //Mark: Service Worker
 const registerServiceWorker = async () => {
   if ("serviceWorker" in navigator) {
@@ -5,8 +237,8 @@ const registerServiceWorker = async () => {
         const thisScript = document.currentScript;
         let buildTag = thisScript.getAttribute('data-buildTag');
         await navigator.serviceWorker.register("/sw.js?build-tag=" + buildTag, {
-            scope: "/",
-        });
+        scope: "/",
+      });
     } catch (error) {
       console.error(`Service worker registration failed:`, error);
     }
@@ -101,6 +333,7 @@ const STREAM_CONFIG = {
 
 const LIVE_STREAM_ARTWORK = 'https://radioseara.fm/recursos/capas/semmarca/ao-vivo.webp';
 let currentStreamId = null; // Track active stream ID ('102' or '104')
+let isLoading = false; // Prevent multiple simultaneous load() calls
 
 // Calculate distance between two coordinates using Haversine formula
 function calculateDistance(lat1, lon1, lat2, lon2) {
@@ -161,6 +394,17 @@ function initializePage(){
     updateLiveBanner();
     ensureLiveStreamSource();
     updateBackButtonVisibility();
+    
+    // #region agent log
+    // Periodic state monitoring to detect when audio stops but data keeps flowing
+    if (!window.audioStateMonitor) {
+        window.audioStateMonitor = setInterval(() => {
+            const allAudioElements = document.getElementsByTagName('audio');
+            const sourceEl = stream?.getElementsByTagName('source')[0];
+            debugLog('app.js:195', 'Periodic audio state check', {audioElementCount:allAudioElements.length,paused:stream?.paused,readyState:stream?.readyState,networkState:stream?.networkState,src:sourceEl?.getAttribute('src'),currentTime:stream?.currentTime,ended:stream?.ended,error:stream?.error?.code}, 'A');
+        }, 5000); // Check every 5 seconds
+    }
+    // #endregion
 }
 
 // Show/hide back button based on current URL
@@ -218,6 +462,10 @@ async function ensureLiveStreamSource(){
     const sourceEl = stream.getElementsByTagName('source')[0];
     if (!sourceEl) return;
     
+    // #region agent log
+    debugLog('app.js:257', 'ensureLiveStreamSource() called', {sourceCount:stream.getElementsByTagName('source').length,currentSrc:sourceEl.getAttribute('src'),paused:stream.paused,readyState:stream.readyState}, 'B');
+    // #endregion
+    
     const currentSrc = sourceEl.getAttribute('src');
     
     // Detect which stream is currently set (if any)
@@ -230,11 +478,20 @@ async function ensureLiveStreamSource(){
     }
     
     // Only set default if no source is set and we're not already playing
-    if (!currentSrc && !currentStreamId) {
+    if (!currentSrc && !currentStreamId && !isLoading) {
+        isLoading = true;
         const defaultStreamId = await determineClosestStream();
         currentStreamId = defaultStreamId;
         sourceEl.setAttribute('src', STREAM_CONFIG[defaultStreamId].url);
+        
+        // #region agent log
+        debugLog('app.js:285', 'ensureLiveStreamSource() - calling load()', {src:STREAM_CONFIG[defaultStreamId].url,sourceCount:stream.getElementsByTagName('source').length}, 'C');
+        // #endregion
+        
         stream.load();
+        
+        // Reset loading flag after a short delay
+        setTimeout(() => { isLoading = false; }, 1000);
     }
 }
 
@@ -280,12 +537,67 @@ var streamFullTime = 0 //in seconds
 var streamTitle = '';
 var scrubUpdater
 stream.volume = 0.5;
+
+// #region agent log
+// Track audio element state and events for debugging stream stops
+stream.addEventListener("play", function() {
+    debugLog('app.js:309', 'Audio play event', {paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState,src:stream.getElementsByTagName('source')[0]?.getAttribute('src')}, 'A');
+});
+stream.addEventListener("pause", function() {
+    debugLog('app.js:334', 'Audio pause event', {paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState,src:stream.getElementsByTagName('source')[0]?.getAttribute('src')}, 'A');
+});
+stream.addEventListener("error", function(e) {
+    debugLog('app.js:337', 'Audio error event', {paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState,error:stream.error?.code,errorMessage:stream.error?.message,src:stream.getElementsByTagName('source')[0]?.getAttribute('src')}, 'D');
+});
+stream.addEventListener("stalled", function() {
+    debugLog('app.js:340', 'Audio stalled event', {paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState,src:stream.getElementsByTagName('source')[0]?.getAttribute('src')}, 'A');
+    
+    // #region agent log - Recovery attempt
+    // If stream is stalled but not paused, try to recover
+    if (!stream.paused && currentStreamId) {
+        debugLog('app.js:343', 'Attempting stalled stream recovery', {currentStreamId, paused:stream.paused, readyState:stream.readyState}, 'A');
+        
+        // Wait a bit to see if it recovers, then reload if still stalled
+        setTimeout(() => {
+            if (!stream.paused && stream.readyState < 3 && currentStreamId && !isLoading) {
+                isLoading = true;
+                debugLog('app.js:348', 'Stalled stream not recovered, reloading', {currentStreamId, readyState:stream.readyState}, 'A');
+                const sourceEl = stream.getElementsByTagName('source')[0];
+                if (sourceEl && currentStreamId) {
+                    const wasPlaying = !stream.paused;
+                    stream.pause();
+                    sourceEl.setAttribute('src', STREAM_CONFIG[currentStreamId].url);
+                    stream.load();
+                    setTimeout(() => { isLoading = false; }, 1000);
+                    if (wasPlaying) {
+                        stream.play().catch(() => {});
+                    }
+                } else {
+                    isLoading = false;
+                }
+            }
+        }, 2000);
+    }
+    // #endregion
+});
+stream.addEventListener("waiting", function() {
+    debugLog('app.js:343', 'Audio waiting event', {paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState,src:stream.getElementsByTagName('source')[0]?.getAttribute('src')}, 'A');
+});
+stream.addEventListener("loadstart", function() {
+    debugLog('app.js:346', 'Audio loadstart event', {paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState,src:stream.getElementsByTagName('source')[0]?.getAttribute('src')}, 'C');
+});
+stream.addEventListener("canplay", function() {
+    isLoading = false; // Reset loading flag when stream can play
+    debugLog('app.js:349', 'Audio canplay event - reset isLoading', {paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState}, 'C');
+});
+// #endregion
+
 stream.addEventListener("volumechange", function() {
     // Show volume slider only on non-iOS devices
     // iOS typically doesn't allow programmatic volume control
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
     if (!isIOS) {
-        removeClass("volume", "hidden");
+    removeClass("volume", "hidden");
     }
 });
 
@@ -352,22 +664,41 @@ async function toggleLiveStream(playButton, streamId = null){
     // Reload if switching streams, or if currentStreamId doesn't match (including when it's null)
     const needsReload = switchingToLive || switchingStream || !currentStreamId || currentStreamId !== targetStreamId;
 
-    if (needsReload) {
+    if (needsReload && !isLoading) {
+        isLoading = true;
+        // #region agent log
+        debugLog('app.js:424', 'Before reload - checking for multiple sources', {sourceCount:stream.getElementsByTagName('source').length,currentSrc:sourceEl.getAttribute('src'),targetUrl:targetStreamUrl,paused:stream.paused,readyState:stream.readyState}, 'B');
+        // #endregion
+        
         // Pause if currently playing
         const wasPlaying = !stream.paused;
         if (wasPlaying) {
-            stream.pause();
+        stream.pause();
         }
         
         sourceEl.setAttribute('src', targetStreamUrl);
         currentStreamId = targetStreamId;
         streamFullTime = 0;
         streamTitle = 'Rádio Seara Ao Vivo';
+        
+        // #region agent log
+        debugLog('app.js:439', 'Calling stream.load()', {src:sourceEl.getAttribute('src'),paused:stream.paused,readyState:stream.readyState}, 'C');
+        // #endregion
         stream.load();
+        
+        // Reset loading flag after a short delay
+        setTimeout(() => { isLoading = false; }, 1000);
         
         // Resume if was playing
         if (wasPlaying) {
-            stream.play().catch(() => {});
+            // #region agent log
+            const playPromise = stream.play();
+            playPromise.then(() => {
+                debugLog('app.js:448', 'stream.play() resolved', {paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState}, 'E');
+            }).catch((err) => {
+                debugLog('app.js:450', 'stream.play() rejected', {error:err.message,paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState}, 'E');
+            });
+            // #endregion
         }
     }
 
@@ -393,6 +724,10 @@ async function toggleLiveStream(playButton, streamId = null){
 function switchStream(streamId) {
     if (currentStreamId === streamId) return;
     
+    // #region agent log
+    debugLog('app.js:479', 'switchStream() called', {fromStreamId:currentStreamId,toStreamId:streamId,wasPlaying:!stream.paused,sourceCount:stream.getElementsByTagName('source').length}, 'B');
+    // #endregion
+    
     // Save preference to localStorage
     localStorage.setItem('preferredStreamId', streamId);
     
@@ -401,7 +736,14 @@ function switchStream(streamId) {
     
     // If was playing, ensure it continues playing
     if (wasPlaying && stream.paused) {
-        stream.play().catch(() => {});
+        // #region agent log
+        const playPromise = stream.play();
+        playPromise.then(() => {
+            debugLog('app.js:493', 'switchStream() - play() resolved', {paused:stream.paused,readyState:stream.readyState}, 'E');
+        }).catch((err) => {
+            debugLog('app.js:495', 'switchStream() - play() rejected', {error:err.message,paused:stream.paused,readyState:stream.readyState}, 'E');
+        });
+        // #endregion
     }
 }
 
@@ -459,15 +801,32 @@ function toggleStream(playButton){
     }
 }
 function playStream(){
+    // #region agent log
+    debugLog('app.js:556', 'playStream() called', {paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState,src:stream.getElementsByTagName('source')[0]?.getAttribute('src'),sourceCount:stream.getElementsByTagName('source').length}, 'E');
+    // #endregion
+    
     if (scrubUpdater) {
         clearInterval(scrubUpdater);
     }
     addClass("bar-play-button", "playing");
-    stream.play().catch(() => {});
+    
+    // #region agent log
+    const playPromise = stream.play();
+    playPromise.then(() => {
+        debugLog('app.js:567', 'playStream() - play() resolved', {paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState}, 'E');
+    }).catch((err) => {
+        debugLog('app.js:569', 'playStream() - play() rejected', {error:err.message,paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState}, 'E');
+    });
+    // #endregion
+    
     scrubUpdater = window.setInterval(updateScrubber, 1000);
 }
 
 function pauseStream(){
+    // #region agent log
+    debugLog('app.js:578', 'pauseStream() called', {paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState,src:stream.getElementsByTagName('source')[0]?.getAttribute('src'),sourceCount:stream.getElementsByTagName('source').length}, 'A');
+    // #endregion
+    
     removeClass("bar-play-button", "playing");
     stream.pause();
     clearInterval(scrubUpdater)
@@ -591,6 +950,10 @@ function playEpisode(audioUrl, title, time, programName, imageUrl){
     // Update Media Session metadata for lock screen
     updateMediaSessionForEpisode(title, programName, imageUrl);
     
+    // #region agent log
+    debugLog('app.js:705', 'playEpisode() - calling load()', {audioUrl,sourceCount:player.getElementsByTagName('source').length}, 'C');
+    // #endregion
+    
     stream.load();
     playStream()
 }
@@ -651,10 +1014,10 @@ if (document.getElementById("scrubber-slider")){
 function updateScrubber(){
     // Only update scrubber if playing an episode (live stream has no scrubber)
     if (streamFullTime > 0 && scrubberRect) {
-        let x = stream.currentTime / streamFullTime * (scrubberRect.width - scrubberHandleDiameter) + scrubberHandleDiameter
-        scrubberActiveRange.style.width = x + "px"
-        displayFormattedCurrentTime(stream.currentTime)
-        streamingAnalytics(stream.currentTime, streamFullTime)
+    let x = stream.currentTime / streamFullTime * (scrubberRect.width - scrubberHandleDiameter) + scrubberHandleDiameter
+    scrubberActiveRange.style.width = x + "px"
+    displayFormattedCurrentTime(stream.currentTime)
+    streamingAnalytics(stream.currentTime, streamFullTime)
     }
 }
 
