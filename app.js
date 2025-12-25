@@ -2,6 +2,11 @@
 // Configure your Sentry DSN here (get it from https://sentry.io)
 const SENTRY_DSN = 'https://57591e4d3698015d44d524db1aa52f2d@o4510596844879872.ingest.us.sentry.io/4510596854579200'; // Set your Sentry DSN here, e.g., 'https://xxxxx@xxxxx.ingest.sentry.io/xxxxx'
 const MAX_LOG_ENTRIES = 1000; // Limit localStorage size
+const SENTRY_BATCH_SIZE = 10; // Send logs to Sentry in batches
+const SENTRY_BATCH_INTERVAL = 10000; // Send batch every 10 seconds
+
+let sentryLogQueue = [];
+let lastSentrySend = 0;
 
 let sessionId = localStorage.getItem('debugSessionId') || 'session-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
 if (!localStorage.getItem('debugSessionId')) {
@@ -9,36 +14,63 @@ if (!localStorage.getItem('debugSessionId')) {
 }
 
 // Initialize Sentry if DSN is configured
-if (SENTRY_DSN && window.Sentry) {
-    window.Sentry.init({
-        dsn: SENTRY_DSN,
-        environment: window.location.hostname.includes('netlify.app') ? 'preview' : 'production',
-        tracesSampleRate: 1.0, // Capture 100% of transactions for debugging
-        beforeSend(event, hint) {
-            // Add session ID to all events
-            event.tags = event.tags || {};
-            event.tags.sessionId = sessionId;
-            return event;
+let sentryInitialized = false;
+function initializeSentry() {
+    if (sentryInitialized || !SENTRY_DSN) return;
+    
+    // Wait for Sentry to be available
+    if (window.Sentry) {
+        try {
+            window.Sentry.init({
+                dsn: SENTRY_DSN,
+                environment: window.location.hostname.includes('netlify.app') ? 'preview' : 'production',
+                tracesSampleRate: 1.0, // Capture 100% of transactions for debugging
+                beforeSend(event, hint) {
+                    // Add session ID to all events
+                    event.tags = event.tags || {};
+                    event.tags.sessionId = sessionId;
+                    return event;
+                }
+            });
+            
+            // Set user context
+            window.Sentry.setUser({
+                id: sessionId,
+                username: `session-${sessionId}`
+            });
+            
+            // Set device context
+            window.Sentry.setContext('device', {
+                userAgent: navigator.userAgent,
+                platform: navigator.platform,
+                language: navigator.language,
+                screenWidth: window.screen.width,
+                screenHeight: window.screen.height,
+                connectionType: navigator.connection?.effectiveType || 'unknown',
+                url: window.location.href
+            });
+            
+            sentryInitialized = true;
+            console.log('[DEBUG] Sentry initialized');
+        } catch (e) {
+            console.error('[DEBUG] Sentry initialization failed:', e);
         }
-    });
-    
-    // Set user context
-    window.Sentry.setUser({
-        id: sessionId,
-        username: `session-${sessionId}`
-    });
-    
-    // Set device context
-    window.Sentry.setContext('device', {
-        userAgent: navigator.userAgent,
-        platform: navigator.platform,
-        language: navigator.language,
-        screenWidth: window.screen.width,
-        screenHeight: window.screen.height,
-        connectionType: navigator.connection?.effectiveType || 'unknown',
-        url: window.location.href
-    });
+    } else {
+        // Retry after a short delay if Sentry isn't loaded yet
+        setTimeout(initializeSentry, 100);
+    }
 }
+
+// Try to initialize Sentry when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeSentry);
+} else {
+    initializeSentry();
+}
+
+// Also try immediately and after a delay
+initializeSentry();
+setTimeout(initializeSentry, 500);
 
 function debugLog(location, message, data, hypothesisId) {
     const logData = {
@@ -65,35 +97,123 @@ function debugLog(location, message, data, hypothesisId) {
         console.warn('[DEBUG] localStorage write failed:', e);
     }
     
-    // Send to Sentry if available
-    if (window.Sentry && SENTRY_DSN) {
-        // Use Sentry's breadcrumb for non-error logs
-        window.Sentry.addBreadcrumb({
-            category: 'debug',
-            message: message,
-            level: 'info',
-            data: {
-                location: location,
-                hypothesisId: hypothesisId,
-                ...data
-            },
-            timestamp: Date.now() / 1000
-        });
+    // Queue for Sentry if available
+    if (SENTRY_DSN) {
+        sentryLogQueue.push(logData);
         
-        // For important events, also send as event
-        if (message.includes('error') || message.includes('stalled') || message.includes('rejected')) {
-            window.Sentry.captureMessage(message, {
-                level: 'warning',
-                tags: {
-                    location: location,
-                    hypothesisId: hypothesisId,
-                    sessionId: sessionId
-                },
-                extra: data
-            });
+        // Send immediately for important events
+        const isImportant = message.includes('error') || 
+                           message.includes('stalled') || 
+                           message.includes('rejected') ||
+                           message.includes('recovery');
+        
+        const now = Date.now();
+        const shouldSend = isImportant || 
+                          sentryLogQueue.length >= SENTRY_BATCH_SIZE || 
+                          (now - lastSentrySend) >= SENTRY_BATCH_INTERVAL;
+        
+        if (shouldSend && sentryLogQueue.length > 0) {
+            sendSentryBatch();
         }
     }
 }
+
+// Send batched logs to Sentry
+function sendSentryBatch() {
+    if (!window.Sentry || !SENTRY_DSN || !sentryInitialized || sentryLogQueue.length === 0) {
+        // Retry initialization if needed
+        if (SENTRY_DSN && !sentryInitialized) {
+            initializeSentry();
+        }
+        return;
+    }
+    
+    const logsToSend = [...sentryLogQueue];
+    sentryLogQueue = [];
+    lastSentrySend = Date.now();
+    
+    try {
+        
+        // Send each log as a breadcrumb
+        logsToSend.forEach(log => {
+            window.Sentry.addBreadcrumb({
+                category: 'debug',
+                message: log.message,
+                level: 'info',
+                data: {
+                    location: log.location,
+                    hypothesisId: log.hypothesisId,
+                    ...log.data
+                },
+                timestamp: log.timestamp / 1000
+            });
+        });
+        
+        // Send as a single event with all logs
+        const importantLogs = logsToSend.filter(log => 
+            log.message.includes('error') || 
+            log.message.includes('stalled') || 
+            log.message.includes('rejected')
+        );
+        
+        if (importantLogs.length > 0) {
+            // Send important logs as individual events
+            importantLogs.forEach(log => {
+                window.Sentry.captureMessage(`[${log.hypothesisId}] ${log.message}`, {
+                    level: 'warning',
+                    tags: {
+                        location: log.location,
+                        hypothesisId: log.hypothesisId,
+                        sessionId: sessionId,
+                        logType: 'debug'
+                    },
+                    extra: {
+                        ...log.data,
+                        timestamp: log.timestamp
+                    }
+                });
+            });
+        } else {
+            // Send batch summary for non-critical logs
+            window.Sentry.captureMessage(`Debug Log Batch (${logsToSend.length} entries)`, {
+                level: 'info',
+                tags: {
+                    sessionId: sessionId,
+                    logType: 'debug-batch',
+                    batchSize: logsToSend.length
+                },
+                extra: {
+                    logs: logsToSend.map(log => ({
+                        message: log.message,
+                        location: log.location,
+                        hypothesisId: log.hypothesisId,
+                        data: log.data
+                    }))
+                }
+            });
+        }
+    } catch (e) {
+        console.warn('[DEBUG] Sentry batch send failed:', e);
+        // Put logs back in queue if send failed
+        if (sentryLogQueue.length < MAX_LOG_ENTRIES) {
+            sentryLogQueue = [...logsToSend, ...sentryLogQueue].slice(0, MAX_LOG_ENTRIES);
+        }
+    }
+}
+
+// Send logs periodically
+setInterval(() => {
+    if (sentryLogQueue.length > 0) {
+        sendSentryBatch();
+    }
+}, SENTRY_BATCH_INTERVAL);
+
+// Send logs on page unload
+window.addEventListener('beforeunload', () => {
+    if (sentryLogQueue.length > 0) {
+        sendSentryBatch();
+    }
+});
 
 // Export function to retrieve logs (call from console: getDebugLogs())
 window.getDebugLogs = function() {
