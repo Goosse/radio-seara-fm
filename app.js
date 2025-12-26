@@ -545,7 +545,30 @@ function initializePage(){
         window.audioStateMonitor = setInterval(() => {
             const allAudioElements = document.getElementsByTagName('audio');
             const sourceEl = stream?.getElementsByTagName('source')[0];
-            debugLog('app.js:195', 'Periodic audio state check', {audioElementCount:allAudioElements.length,paused:stream?.paused,readyState:stream?.readyState,networkState:stream?.networkState,src:sourceEl?.getAttribute('src'),currentTime:stream?.currentTime,ended:stream?.ended,error:stream?.error?.code}, 'A');
+            // Get buffer information
+            let bufferInfo = null;
+            if (stream && stream.buffered && stream.buffered.length > 0) {
+                const bufferedEnd = stream.buffered.end(stream.buffered.length - 1);
+                const bufferedStart = stream.buffered.start(0);
+                bufferInfo = {
+                    bufferedRanges: stream.buffered.length,
+                    bufferedStart: bufferedStart,
+                    bufferedEnd: bufferedEnd,
+                    bufferedDuration: bufferedEnd - bufferedStart,
+                    bufferAhead: bufferedEnd - (stream.currentTime || 0)
+                };
+            }
+            debugLog('app.js:195', 'Periodic audio state check', {
+                audioElementCount:allAudioElements.length,
+                paused:stream?.paused,
+                readyState:stream?.readyState,
+                networkState:stream?.networkState,
+                src:sourceEl?.getAttribute('src'),
+                currentTime:stream?.currentTime,
+                ended:stream?.ended,
+                error:stream?.error?.code,
+                ...bufferInfo
+            }, 'A');
         }, 5000); // Check every 5 seconds
     }
     // #endregion
@@ -694,33 +717,87 @@ stream.addEventListener("error", function(e) {
     debugLog('app.js:337', 'Audio error event', {paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState,error:stream.error?.code,errorMessage:stream.error?.message,src:stream.getElementsByTagName('source')[0]?.getAttribute('src')}, 'D');
 });
 stream.addEventListener("stalled", function() {
-    debugLog('app.js:340', 'Audio stalled event', {paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState,src:stream.getElementsByTagName('source')[0]?.getAttribute('src')}, 'A');
+    // Get buffer information at stall time
+    let bufferInfo = null;
+    if (stream.buffered && stream.buffered.length > 0) {
+        const bufferedEnd = stream.buffered.end(stream.buffered.length - 1);
+        const bufferedStart = stream.buffered.start(0);
+        bufferInfo = {
+            bufferedRanges: stream.buffered.length,
+            bufferedStart: bufferedStart,
+            bufferedEnd: bufferedEnd,
+            bufferedDuration: bufferedEnd - bufferedStart,
+            bufferAhead: bufferedEnd - (stream.currentTime || 0)
+        };
+    }
+    
+    debugLog('app.js:340', 'Audio stalled event', {
+        paused:stream.paused,
+        readyState:stream.readyState,
+        networkState:stream.networkState,
+        src:stream.getElementsByTagName('source')[0]?.getAttribute('src'),
+        currentTime:stream.currentTime,
+        ...bufferInfo
+    }, 'A');
     
     // #region agent log - Recovery attempt
     // If stream is stalled but not paused, try to recover
     if (!stream.paused && currentStreamId) {
-        debugLog('app.js:343', 'Attempting stalled stream recovery', {currentStreamId, paused:stream.paused, readyState:stream.readyState}, 'A');
+        const bufferAhead = bufferInfo ? bufferInfo.bufferAhead : 0;
+        const hasBuffer = bufferAhead > 0.5; // At least 0.5 seconds of buffer
         
-        // Wait a bit to see if it recovers, then reload if still stalled
-        setTimeout(() => {
-            if (!stream.paused && stream.readyState < 3 && currentStreamId && !isLoading) {
-                isLoading = true;
-                debugLog('app.js:348', 'Stalled stream not recovered, reloading', {currentStreamId, readyState:stream.readyState}, 'A');
-                const sourceEl = stream.getElementsByTagName('source')[0];
-                if (sourceEl && currentStreamId) {
-                    const wasPlaying = !stream.paused;
-                    stream.pause();
-                    sourceEl.setAttribute('src', STREAM_CONFIG[currentStreamId].url);
-                    stream.load();
-                    setTimeout(() => { isLoading = false; }, 1000);
-                    if (wasPlaying) {
-                        stream.play().catch(() => {});
+        debugLog('app.js:343', 'Attempting stalled stream recovery', {
+            currentStreamId,
+            paused:stream.paused,
+            readyState:stream.readyState,
+            bufferAhead:bufferAhead,
+            hasBuffer:hasBuffer
+        }, 'A');
+        
+        // If we have buffer, try a simple play() first
+        // If buffer is low or readyState is low, reload the stream
+        if (hasBuffer && stream.readyState >= 3) {
+            // Try to resume playback - browser might have paused it internally
+            stream.play().catch((err) => {
+                debugLog('app.js:360', 'play() failed after stall, will reload', {error:err.message, readyState:stream.readyState}, 'A');
+                // If play() fails, fall through to reload logic
+                setTimeout(() => {
+                    if (!stream.paused && currentStreamId && !isLoading) {
+                        performStreamReload();
                     }
-                } else {
-                    isLoading = false;
+                }, 1000);
+            });
+        } else {
+            // Low buffer or low readyState - reload the stream
+            setTimeout(() => {
+                if (!stream.paused && currentStreamId && !isLoading) {
+                    performStreamReload();
                 }
+            }, 2000);
+        }
+    }
+    
+    function performStreamReload() {
+        if (isLoading) return;
+        isLoading = true;
+        debugLog('app.js:375', 'Stalled stream not recovered, reloading', {
+            currentStreamId,
+            readyState:stream.readyState,
+            bufferAhead:bufferInfo ? bufferInfo.bufferAhead : 0
+        }, 'A');
+        const sourceEl = stream.getElementsByTagName('source')[0];
+        if (sourceEl && currentStreamId) {
+            const wasPlaying = !stream.paused;
+            stream.pause();
+            sourceEl.setAttribute('src', STREAM_CONFIG[currentStreamId].url);
+            stream.load();
+            setTimeout(() => { isLoading = false; }, 1000);
+            if (wasPlaying) {
+                stream.play().catch(() => {});
             }
-        }, 2000);
+        } else {
+            isLoading = false;
+        }
     }
     // #endregion
 });
@@ -1300,11 +1377,19 @@ function shareUrl(url, title){
     var email = document.getElementById("email-share")
     var titleSpan = document.getElementById("share-title")
 
+    if (!dialog || !fb || !wa || !twitter || !email) {
+        console.warn('Share dialog elements not found');
+        return;
+    }
+
     fb.href = "https://www.facebook.com/sharer/sharer.php?u=" + encodeURI(url)
     wa.href = "whatsapp://send?text=" + url
     twitter.href = "https://twitter.com/intent/tweet?text=" + encodeURI(url)
     email.href = "mailto:?subject=Veja%20o%20que%20eu%20descrobi!&body=" + url
-    titleSpan.innerHTML = title
+    
+    if (titleSpan) {
+        titleSpan.innerHTML = title
+    }
 
     dialog.classList.remove("hidden")
     disableScrolling();
