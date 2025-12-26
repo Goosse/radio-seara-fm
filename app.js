@@ -567,8 +567,37 @@ function initializePage(){
                 currentTime:stream?.currentTime,
                 ended:stream?.ended,
                 error:stream?.error?.code,
+                currentStreamId:currentStreamId,
                 ...bufferInfo
             }, 'A');
+            
+            // #region agent log - Detect ended live stream in periodic check
+            // If a live stream has ended (buffer ran out), reload it
+            if (stream && stream.ended && currentStreamId && !isLoading) {
+                const bufferAhead = bufferInfo ? bufferInfo.bufferAhead : -1;
+                debugLog('app.js:210', 'Periodic check detected ended live stream - reloading', {
+                    currentStreamId,
+                    bufferAhead:bufferAhead,
+                    readyState:stream.readyState,
+                    currentTime:stream.currentTime
+                }, 'A');
+                
+                isLoading = true;
+                const sourceEl = stream.getElementsByTagName('source')[0];
+                if (sourceEl && currentStreamId) {
+                    const wasPlaying = !stream.paused;
+                    stream.pause();
+                    sourceEl.setAttribute('src', STREAM_CONFIG[currentStreamId].url);
+                    stream.load();
+                    setTimeout(() => { isLoading = false; }, 1000);
+                    if (wasPlaying) {
+                        stream.play().catch(() => {});
+                    }
+                } else {
+                    isLoading = false;
+                }
+            }
+            // #endregion
         }, 5000); // Check every 5 seconds
     }
     // #endregion
@@ -810,6 +839,57 @@ stream.addEventListener("loadstart", function() {
 stream.addEventListener("canplay", function() {
     isLoading = false; // Reset loading flag when stream can play
     debugLog('app.js:349', 'Audio canplay event - reset isLoading', {paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState}, 'C');
+});
+stream.addEventListener("ended", function() {
+    // Get buffer information at end time
+    let bufferInfo = null;
+    if (stream.buffered && stream.buffered.length > 0) {
+        const bufferedEnd = stream.buffered.end(stream.buffered.length - 1);
+        const bufferedStart = stream.buffered.start(0);
+        bufferInfo = {
+            bufferedRanges: stream.buffered.length,
+            bufferedStart: bufferedStart,
+            bufferedEnd: bufferedEnd,
+            bufferedDuration: bufferedEnd - bufferedStart,
+            bufferAhead: bufferedEnd - (stream.currentTime || 0)
+        };
+    }
+    
+    debugLog('app.js:365', 'Audio ended event', {
+        paused:stream.paused,
+        readyState:stream.readyState,
+        networkState:stream.networkState,
+        src:stream.getElementsByTagName('source')[0]?.getAttribute('src'),
+        currentTime:stream.currentTime,
+        currentStreamId:currentStreamId,
+        ...bufferInfo
+    }, 'A');
+    
+    // #region agent log - Live stream ended recovery
+    // For live streams, "ended" means the buffer ran out - we need to reload
+    if (currentStreamId && !isLoading) {
+        debugLog('app.js:380', 'Live stream ended - reloading', {
+            currentStreamId,
+            readyState:stream.readyState,
+            bufferAhead:bufferInfo ? bufferInfo.bufferAhead : 0
+        }, 'A');
+        
+        isLoading = true;
+        const sourceEl = stream.getElementsByTagName('source')[0];
+        if (sourceEl && currentStreamId) {
+            const wasPlaying = !stream.paused;
+            stream.pause();
+            sourceEl.setAttribute('src', STREAM_CONFIG[currentStreamId].url);
+            stream.load();
+            setTimeout(() => { isLoading = false; }, 1000);
+            if (wasPlaying) {
+                stream.play().catch(() => {});
+            }
+        } else {
+            isLoading = false;
+        }
+    }
+    // #endregion
 });
 // #endregion
 
