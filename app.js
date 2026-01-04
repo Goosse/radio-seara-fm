@@ -537,6 +537,8 @@ let currentStreamId = null; // Track active stream ID ('102' or '104')
 let isLoading = false; // Prevent multiple simultaneous load() calls
 let lastReloadTime = 0; // Track last reload time to prevent reload loops
 const RELOAD_COOLDOWN_MS = 20000; // 20 seconds minimum between reloads
+let waitingStartTime = null; // Track when waiting event started
+const WAITING_TIMEOUT_MS = 10000; // 10 seconds - if stuck in waiting, reload
 
 // Loading indicator management (only for bar player)
 function showLoadingIndicator() {
@@ -609,128 +611,7 @@ function initializePage(){
     ensureLiveStreamSource();
     updateBackButtonVisibility();
     setupYouTubeAutoplay();
-    /*
-    // #region agent log
-    // Periodic state monitoring to detect when audio stops but data keeps flowing
-    if (!window.audioStateMonitor) {
-        window.audioStateMonitor = setInterval(() => {
-            const allAudioElements = document.getElementsByTagName('audio');
-            const sourceEl = stream?.getElementsByTagName('source')[0];
-            // Get buffer information
-            let bufferInfo = null;
-            if (stream && stream.buffered && stream.buffered.length > 0) {
-                const bufferedEnd = stream.buffered.end(stream.buffered.length - 1);
-                const bufferedStart = stream.buffered.start(0);
-                bufferInfo = {
-                    bufferedRanges: stream.buffered.length,
-                    bufferedStart: bufferedStart,
-                    bufferedEnd: bufferedEnd,
-                    bufferedDuration: bufferedEnd - bufferedStart,
-                    bufferAhead: bufferedEnd - (stream.currentTime || 0)
-                };
-            }
-            debugLog('app.js:195', 'Periodic audio state check', {
-                audioElementCount:allAudioElements.length,
-                paused:stream?.paused,
-                readyState:stream?.readyState,
-                networkState:stream?.networkState,
-                src:sourceEl?.getAttribute('src'),
-                currentTime:stream?.currentTime,
-                ended:stream?.ended,
-                error:stream?.error?.code,
-                currentStreamId:currentStreamId,
-                ...bufferInfo
-            }, 'A');
-            
-            // #region agent log - Detect ended live stream or exhausted buffer in periodic check
-            // If a live stream has ended (buffer ran out), reload it (with cooldown)
-            if (stream && stream.ended && currentStreamId && !isLoading) {
-                const bufferAhead = bufferInfo ? bufferInfo.bufferAhead : -1;
-                const now = Date.now();
-                
-                if ((now - lastReloadTime) >= RELOAD_COOLDOWN_MS) {
-                    debugLog('app.js:210', 'Periodic check detected ended live stream - reloading', {
-                        currentStreamId,
-                        bufferAhead:bufferAhead,
-                        readyState:stream.readyState,
-                        currentTime:stream.currentTime,
-                        timeSinceLastReload: now - lastReloadTime
-                    }, 'A');
-                    
-                    isLoading = true;
-                    lastReloadTime = now;
-                    const sourceEl = stream.getElementsByTagName('source')[0];
-                    if (sourceEl && currentStreamId) {
-                        const wasPlaying = !stream.paused;
-                        stream.pause();
-                        sourceEl.setAttribute('src', STREAM_CONFIG[currentStreamId].url);
-                        stream.load();
-                        setTimeout(() => { isLoading = false; }, 1000);
-                        if (wasPlaying) {
-                            stream.play().catch(() => {});
-                        }
-                    } else {
-                        isLoading = false;
-                    }
-                } else {
-                    debugLog('app.js:210', 'Periodic check detected ended stream but cooldown active', {
-                        currentStreamId,
-                        bufferAhead:bufferAhead,
-                        timeSinceLastReload: now - lastReloadTime,
-                        cooldownRemaining: RELOAD_COOLDOWN_MS - (now - lastReloadTime)
-                    }, 'A');
-                }
-            }
-            // If buffer is EXHAUSTED (0 or negative) and stream is playing, reload (with cooldown)
-            // Only reload when truly exhausted, not just low, to give stream time to recover on slow connections
-            else if (stream && !stream.paused && currentStreamId && !isLoading && !stream.ended) {
-                const bufferAhead = bufferInfo ? bufferInfo.bufferAhead : 0;
-                // Only reload if buffer is EXHAUSTED (0 or negative), not just low
-                const isExhausted = bufferAhead <= 0;
-                
-                if (isExhausted && stream.readyState <= 2) {
-                    const now = Date.now();
-                    if ((now - lastReloadTime) >= RELOAD_COOLDOWN_MS) {
-                        debugLog('app.js:235', 'Periodic check detected exhausted buffer - reloading', {
-                            currentStreamId,
-                            bufferAhead:bufferAhead,
-                            readyState:stream.readyState,
-                            currentTime:stream.currentTime,
-                            timeSinceLastReload: now - lastReloadTime
-                        }, 'A');
-                        
-                        isLoading = true;
-                        lastReloadTime = now;
-                        const sourceEl = stream.getElementsByTagName('source')[0];
-                        if (sourceEl && currentStreamId) {
-                            const wasPlaying = !stream.paused;
-                            stream.pause();
-                            sourceEl.setAttribute('src', STREAM_CONFIG[currentStreamId].url);
-                            stream.load();
-                            setTimeout(() => { isLoading = false; }, 1000);
-                            if (wasPlaying) {
-                                stream.play().catch(() => {});
-                            }
-                        } else {
-                            isLoading = false;
-                        }
-                    } else {
-                        debugLog('app.js:235', 'Periodic check detected exhausted buffer but cooldown active', {
-                            currentStreamId,
-                            bufferAhead:bufferAhead,
-                            readyState:stream.readyState,
-                            timeSinceLastReload: now - lastReloadTime,
-                            cooldownRemaining: RELOAD_COOLDOWN_MS - (now - lastReloadTime)
-                        }, 'A');
-                    }
-                }
-            }
-            // #endregion
-        }, 5000); // Check every 5 seconds
-    }
-    // #endregion
-*/
-    }
+}
 
 // Show/hide back button based on current URL
 function updateBackButtonVisibility() {
@@ -936,44 +817,60 @@ stream.addEventListener("stalled", function() {
             }, 2000);
         }
     }
-    
-    function performStreamReload() {
-        const now = Date.now();
-        if (isLoading) {
-            debugLog('app.js:839', 'Reload skipped - already loading', {}, 'A');
-            return;
-        }
-        if ((now - lastReloadTime) < RELOAD_COOLDOWN_MS) {
-            debugLog('app.js:839', 'Reload skipped - cooldown active', {
-                timeSinceLastReload: now - lastReloadTime,
-                cooldownRemaining: RELOAD_COOLDOWN_MS - (now - lastReloadTime)
-            }, 'A');
-            return;
-        }
-        
-        isLoading = true;
-        lastReloadTime = now;
-        debugLog('app.js:375', 'Stalled stream not recovered, reloading', {
-            currentStreamId,
-            readyState:stream.readyState,
-            bufferAhead:bufferInfo ? bufferInfo.bufferAhead : 0
-        }, 'A');
-        const sourceEl = stream.getElementsByTagName('source')[0];
-        if (sourceEl && currentStreamId) {
-            const wasPlaying = !stream.paused;
-            stream.pause();
-            sourceEl.setAttribute('src', STREAM_CONFIG[currentStreamId].url);
-            stream.load();
-            setTimeout(() => { isLoading = false; }, 1000);
-            if (wasPlaying) {
-                stream.play().catch(() => {});
-            }
-        } else {
-            isLoading = false;
-        }
-    }
     // #endregion
 });
+
+// Reload stream function (accessible from multiple event handlers)
+function performStreamReload() {
+    const now = Date.now();
+    if (isLoading) {
+        debugLog('app.js:839', 'Reload skipped - already loading', {}, 'A');
+        return;
+    }
+    if ((now - lastReloadTime) < RELOAD_COOLDOWN_MS) {
+        debugLog('app.js:839', 'Reload skipped - cooldown active', {
+            timeSinceLastReload: now - lastReloadTime,
+            cooldownRemaining: RELOAD_COOLDOWN_MS - (now - lastReloadTime)
+        }, 'A');
+        return;
+    }
+    
+    isLoading = true;
+    lastReloadTime = now;
+    
+    // Get buffer info for logging
+    let bufferInfo = null;
+    if (stream.buffered && stream.buffered.length > 0) {
+        const bufferedEnd = stream.buffered.end(stream.buffered.length - 1);
+        const bufferedStart = stream.buffered.start(0);
+        bufferInfo = {
+            bufferedRanges: stream.buffered.length,
+            bufferedStart: bufferedStart,
+            bufferedEnd: bufferedEnd,
+            bufferedDuration: bufferedEnd - bufferedStart,
+            bufferAhead: bufferedEnd - (stream.currentTime || 0)
+        };
+    }
+    
+    debugLog('app.js:375', 'Stalled stream not recovered, reloading', {
+        currentStreamId,
+        readyState:stream.readyState,
+        bufferAhead:bufferInfo ? bufferInfo.bufferAhead : 0
+    }, 'A');
+    const sourceEl = stream.getElementsByTagName('source')[0];
+    if (sourceEl && currentStreamId) {
+        const wasPlaying = !stream.paused;
+        stream.pause();
+        sourceEl.setAttribute('src', STREAM_CONFIG[currentStreamId].url);
+        stream.load();
+        setTimeout(() => { isLoading = false; }, 1000);
+        if (wasPlaying) {
+            stream.play().catch(() => {});
+        }
+    } else {
+        isLoading = false;
+    }
+}
 stream.addEventListener("waiting", function() {
     // Get buffer information at waiting time
     let bufferInfo = null;
@@ -1003,6 +900,26 @@ stream.addEventListener("waiting", function() {
         showLoadingIndicator();
     }
     
+    // Track when waiting started
+    if (!waitingStartTime) {
+        waitingStartTime = Date.now();
+        
+        // If stuck in waiting too long, reload the stream
+        setTimeout(() => {
+            if (waitingStartTime && (Date.now() - waitingStartTime) >= WAITING_TIMEOUT_MS) {
+                if (currentStreamId && !stream.paused && !isLoading) {
+                    debugLog('app.js:343', 'Stream stuck in waiting state too long - reloading', {
+                        waitingDuration: Date.now() - waitingStartTime,
+                        readyState: stream.readyState,
+                        networkState: stream.networkState
+                    }, 'A');
+                    performStreamReload();
+                }
+                waitingStartTime = null;
+            }
+        }, WAITING_TIMEOUT_MS);
+    }
+    
     // #region agent log - Removed proactive reload from waiting event
     // Let stalled/ended events handle recovery to avoid reload loops on slow connections
     // The waiting event is just a warning that buffer is low, not necessarily exhausted
@@ -1017,9 +934,39 @@ stream.addEventListener("loadstart", function() {
 });
 stream.addEventListener("canplay", function() {
     isLoading = false; // Reset loading flag when stream can play
+    waitingStartTime = null; // Reset waiting timer when stream can play
     debugLog('app.js:349', 'Audio canplay event - reset isLoading', {paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState}, 'C');
     // Hide loading indicator when ready to play
     hideLoadingIndicator();
+    
+    // If we have a live stream that should be playing but is paused, try to resume
+    if (currentStreamId) {
+        const playButton = document.getElementById('bar-play-button');
+        const shouldBePlaying = playButton && playButton.classList.contains('playing');
+        
+        if (shouldBePlaying && stream.paused && navigator.onLine) {
+            debugLog('app.js:349', 'Stream can play and should be playing - attempting to resume', {
+                paused: stream.paused,
+                readyState: stream.readyState,
+                networkState: stream.networkState,
+                online: navigator.onLine
+            }, 'A');
+            setTimeout(() => {
+                if (currentStreamId && stream.paused && !isLoading) {
+                    stream.play().catch((err) => {
+                        debugLog('app.js:349', 'play() failed in canplay handler - reloading', {
+                            error: err.message,
+                            readyState: stream.readyState,
+                            networkState: stream.networkState
+                        }, 'A');
+                        if (!isLoading) {
+                            performStreamReload();
+                        }
+                    });
+                }
+            }, 100);
+        }
+    }
 });
 stream.addEventListener("ended", function() {
     // Get buffer information at end time
@@ -1087,6 +1034,98 @@ stream.addEventListener("ended", function() {
     // #endregion
 });
 // #endregion
+
+// Network connectivity event listeners
+window.addEventListener('online', function() {
+    const playButton = document.getElementById('bar-play-button');
+    const shouldBePlaying = playButton && playButton.classList.contains('playing');
+    
+    debugLog('app.js:online', 'Network connectivity restored', {
+        currentStreamId,
+        paused: stream.paused,
+        readyState: stream.readyState,
+        networkState: stream.networkState,
+        shouldBePlaying: shouldBePlaying,
+        playButtonHasPlayingClass: shouldBePlaying,
+        isLoading: isLoading,
+        waitingStartTime: waitingStartTime
+    }, 'A');
+    
+    // Reset loading flags when connectivity is restored to allow recovery
+    if (currentStreamId) {
+        // Reset waiting timer since we're back online
+        waitingStartTime = null;
+        // If we've been stuck loading for a while, reset the flag
+        if (isLoading) {
+            debugLog('app.js:online', 'Resetting isLoading flag after connectivity restored', {}, 'A');
+            isLoading = false;
+        }
+    }
+    
+    // If we have a live stream, check if we need to recover
+    if (currentStreamId) {
+        const isInBadState = stream.networkState === 3 || // NETWORK_NO_SOURCE
+                            stream.readyState < 2 ||      // HAVE_NOTHING or HAVE_METADATA
+                            (stream.error && stream.error.code !== 0); // Has error
+        
+        // If the UI shows it should be playing, always check and recover if needed
+        if (shouldBePlaying) {
+            // If stream is paused or in bad state, reload it
+            if (stream.paused || isInBadState) {
+                debugLog('app.js:online', 'Stream should be playing but is paused or in bad state - reloading', {
+                    paused: stream.paused,
+                    readyState: stream.readyState,
+                    networkState: stream.networkState,
+                    error: stream.error?.code,
+                    shouldBePlaying: shouldBePlaying
+                }, 'A');
+                setTimeout(() => {
+                    if (currentStreamId && !isLoading) {
+                        performStreamReload();
+                    }
+                }, 1000);
+            }
+            // If stream claims to be playing but might be stuck, verify and reload if needed
+            // else if (!stream.paused) {
+            //     // Double-check: if readyState is low or networkState is questionable, reload anyway
+            //     if (stream.readyState < 3 || stream.networkState !== 2) {
+            //         debugLog('app.js:online', 'Stream playing but state questionable after connectivity restored - reloading', {
+            //             readyState: stream.readyState,
+            //             networkState: stream.networkState,
+            //             error: stream.error?.code
+            //         }, 'A');
+            //         setTimeout(() => {
+            //             if (currentStreamId && !isLoading) {
+            //                 performStreamReload();
+            //             }
+            //         }, 1000);
+            //     }
+            // }
+        }
+        // If stream is not paused but in bad state (even if UI doesn't show playing), reload it
+        else if (!stream.paused && isInBadState) {
+            debugLog('app.js:online', 'Stream playing but in bad state after connectivity restored - reloading', {
+                readyState: stream.readyState,
+                networkState: stream.networkState,
+                error: stream.error?.code
+            }, 'A');
+            setTimeout(() => {
+                if (currentStreamId && !isLoading) {
+                    performStreamReload();
+                }
+            }, 1000);
+        }
+    }
+});
+
+window.addEventListener('offline', function() {
+    debugLog('app.js:offline', 'Network connectivity lost', {
+        currentStreamId,
+        paused: stream.paused,
+        readyState: stream.readyState,
+        networkState: stream.networkState
+    }, 'A');
+});
 
 stream.addEventListener("volumechange", function() {
     // Show volume slider only on non-iOS devices
@@ -1301,6 +1340,17 @@ function playStream(){
     debugLog('app.js:556', 'playStream() called', {paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState,src:stream.getElementsByTagName('source')[0]?.getAttribute('src'),sourceCount:stream.getElementsByTagName('source').length}, 'E');
     // #endregion
     
+    // Check if stream is in a bad state before attempting to play
+    if (currentStreamId && stream.networkState === 3) { // NETWORK_NO_SOURCE or error state
+        debugLog('app.js:556', 'Stream in error state, reloading before play', {
+            networkState: stream.networkState,
+            readyState: stream.readyState,
+            error: stream.error?.code
+        }, 'A');
+        performStreamReload();
+        return;
+    }
+    
     if (scrubUpdater) {
         clearInterval(scrubUpdater);
     }
@@ -1316,6 +1366,20 @@ function playStream(){
         }
     }).catch((err) => {
         debugLog('app.js:569', 'playStream() - play() rejected', {error:err.message,paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState}, 'E');
+        
+        // If play() is rejected and we're trying to play a live stream, reload it
+        if (currentStreamId && !stream.paused && (stream.networkState === 3 || stream.readyState < 2)) {
+            debugLog('app.js:569', 'play() rejected with bad network/ready state - reloading stream', {
+                networkState: stream.networkState,
+                readyState: stream.readyState,
+                error: err.message
+            }, 'A');
+            setTimeout(() => {
+                if (currentStreamId && !isLoading) {
+                    performStreamReload();
+                }
+            }, 1000);
+        }
     });
     // #endregion
     
