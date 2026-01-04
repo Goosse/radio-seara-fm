@@ -1,4 +1,4 @@
-//Mark: Debug Logging with Sentry
+ //Mark: Debug Logging with Sentry
 // Configure your Sentry DSN here (get it from https://sentry.io)
 const SENTRY_DSN = 'https://57591e4d3698015d44d524db1aa52f2d@o4510596844879872.ingest.us.sentry.io/4510596854579200'; // Set your Sentry DSN here, e.g., 'https://xxxxx@xxxxx.ingest.sentry.io/xxxxx'
 const MAX_LOG_ENTRIES = 1000; // Limit localStorage size
@@ -390,6 +390,63 @@ const registerServiceWorker = async () => {
 };
 registerServiceWorker();
 
+//Mark: YouTube Autoplay Based on Connection Speed
+function shouldAutoplayYouTube() {
+    // Check Network Information API
+    if (navigator.connection) {
+        const connection = navigator.connection;
+        const effectiveType = connection.effectiveType; // '4g', '3g', '2g', 'slow-2g'
+        const downlink = connection.downlink; // Bandwidth in Mbps
+        
+        // Autoplay if 4g connection or downlink > 1.5 Mbps
+        if (effectiveType === '4g' || (downlink && downlink > 1.5)) {
+            return true;
+        }
+    }
+    
+    // Fallback: check if on WiFi (connection type might not be available)
+    // Default to no autoplay for slower connections
+    return false;
+}
+
+function setupYouTubeAutoplay() {
+    const shouldAutoplay = shouldAutoplayYouTube();
+    
+    // Update home page YouTube embed
+    const homeEmbed = document.getElementById('home-youtube-embed');
+    if (homeEmbed) {
+        const currentSrc = homeEmbed.src;
+        // Remove autoplay first to get clean URL
+        let cleanSrc = currentSrc.replace(/[&?]autoplay=1/, '').replace(/autoplay=1[&?]/, '');
+        
+        if (shouldAutoplay) {
+            // Add autoplay parameter
+            const separator = cleanSrc.includes('?') ? '&' : '?';
+            homeEmbed.src = cleanSrc + separator + 'autoplay=1';
+        } else {
+            // Ensure autoplay is removed
+            homeEmbed.src = cleanSrc;
+        }
+    }
+    
+    // Update parceiros page YouTube embed
+    const parceirosEmbed = document.getElementById('parceiros-youtube-embed');
+    if (parceirosEmbed) {
+        const currentSrc = parceirosEmbed.src;
+        // Remove autoplay first to get clean URL
+        let cleanSrc = currentSrc.replace(/[&?]autoplay=1/, '').replace(/autoplay=1[&?]/, '');
+        
+        if (shouldAutoplay) {
+            // Add autoplay parameter
+            const separator = cleanSrc.includes('?') ? '&' : '?';
+            parceirosEmbed.src = cleanSrc + separator + 'autoplay=1';
+        } else {
+            // Ensure autoplay is removed
+            parceirosEmbed.src = cleanSrc;
+        }
+    }
+}
+
 //Mark: SPA Navigation (Persistent Player)
 function isInternalLink(url) {
     try {
@@ -478,6 +535,19 @@ const STREAM_CONFIG = {
 const LIVE_STREAM_ARTWORK = 'https://radioseara.fm/recursos/capas/semmarca/ao-vivo.webp';
 let currentStreamId = null; // Track active stream ID ('102' or '104')
 let isLoading = false; // Prevent multiple simultaneous load() calls
+let lastReloadTime = 0; // Track last reload time to prevent reload loops
+const RELOAD_COOLDOWN_MS = 20000; // 20 seconds minimum between reloads
+
+// Loading indicator management (only for bar player)
+function showLoadingIndicator() {
+    const barButton = document.getElementById('bar-play-button');
+    if (barButton) barButton.classList.add('buffering');
+}
+
+function hideLoadingIndicator() {
+    const barButton = document.getElementById('bar-play-button');
+    if (barButton) barButton.classList.remove('buffering');
+}
 
 // Calculate distance between two coordinates using Haversine formula
 function calculateDistance(lat1, lon1, lat2, lon2) {
@@ -538,7 +608,8 @@ function initializePage(){
     updateLiveBanner();
     ensureLiveStreamSource();
     updateBackButtonVisibility();
-    
+    setupYouTubeAutoplay();
+    /*
     // #region agent log
     // Periodic state monitoring to detect when audio stops but data keeps flowing
     if (!window.audioStateMonitor) {
@@ -571,37 +642,95 @@ function initializePage(){
                 ...bufferInfo
             }, 'A');
             
-            // #region agent log - Detect ended live stream in periodic check
-            // If a live stream has ended (buffer ran out), reload it
+            // #region agent log - Detect ended live stream or exhausted buffer in periodic check
+            // If a live stream has ended (buffer ran out), reload it (with cooldown)
             if (stream && stream.ended && currentStreamId && !isLoading) {
                 const bufferAhead = bufferInfo ? bufferInfo.bufferAhead : -1;
-                debugLog('app.js:210', 'Periodic check detected ended live stream - reloading', {
-                    currentStreamId,
-                    bufferAhead:bufferAhead,
-                    readyState:stream.readyState,
-                    currentTime:stream.currentTime
-                }, 'A');
+                const now = Date.now();
                 
-                isLoading = true;
-                const sourceEl = stream.getElementsByTagName('source')[0];
-                if (sourceEl && currentStreamId) {
-                    const wasPlaying = !stream.paused;
-                    stream.pause();
-                    sourceEl.setAttribute('src', STREAM_CONFIG[currentStreamId].url);
-                    stream.load();
-                    setTimeout(() => { isLoading = false; }, 1000);
-                    if (wasPlaying) {
-                        stream.play().catch(() => {});
+                if ((now - lastReloadTime) >= RELOAD_COOLDOWN_MS) {
+                    debugLog('app.js:210', 'Periodic check detected ended live stream - reloading', {
+                        currentStreamId,
+                        bufferAhead:bufferAhead,
+                        readyState:stream.readyState,
+                        currentTime:stream.currentTime,
+                        timeSinceLastReload: now - lastReloadTime
+                    }, 'A');
+                    
+                    isLoading = true;
+                    lastReloadTime = now;
+                    const sourceEl = stream.getElementsByTagName('source')[0];
+                    if (sourceEl && currentStreamId) {
+                        const wasPlaying = !stream.paused;
+                        stream.pause();
+                        sourceEl.setAttribute('src', STREAM_CONFIG[currentStreamId].url);
+                        stream.load();
+                        setTimeout(() => { isLoading = false; }, 1000);
+                        if (wasPlaying) {
+                            stream.play().catch(() => {});
+                        }
+                    } else {
+                        isLoading = false;
                     }
                 } else {
-                    isLoading = false;
+                    debugLog('app.js:210', 'Periodic check detected ended stream but cooldown active', {
+                        currentStreamId,
+                        bufferAhead:bufferAhead,
+                        timeSinceLastReload: now - lastReloadTime,
+                        cooldownRemaining: RELOAD_COOLDOWN_MS - (now - lastReloadTime)
+                    }, 'A');
+                }
+            }
+            // If buffer is EXHAUSTED (0 or negative) and stream is playing, reload (with cooldown)
+            // Only reload when truly exhausted, not just low, to give stream time to recover on slow connections
+            else if (stream && !stream.paused && currentStreamId && !isLoading && !stream.ended) {
+                const bufferAhead = bufferInfo ? bufferInfo.bufferAhead : 0;
+                // Only reload if buffer is EXHAUSTED (0 or negative), not just low
+                const isExhausted = bufferAhead <= 0;
+                
+                if (isExhausted && stream.readyState <= 2) {
+                    const now = Date.now();
+                    if ((now - lastReloadTime) >= RELOAD_COOLDOWN_MS) {
+                        debugLog('app.js:235', 'Periodic check detected exhausted buffer - reloading', {
+                            currentStreamId,
+                            bufferAhead:bufferAhead,
+                            readyState:stream.readyState,
+                            currentTime:stream.currentTime,
+                            timeSinceLastReload: now - lastReloadTime
+                        }, 'A');
+                        
+                        isLoading = true;
+                        lastReloadTime = now;
+                        const sourceEl = stream.getElementsByTagName('source')[0];
+                        if (sourceEl && currentStreamId) {
+                            const wasPlaying = !stream.paused;
+                            stream.pause();
+                            sourceEl.setAttribute('src', STREAM_CONFIG[currentStreamId].url);
+                            stream.load();
+                            setTimeout(() => { isLoading = false; }, 1000);
+                            if (wasPlaying) {
+                                stream.play().catch(() => {});
+                            }
+                        } else {
+                            isLoading = false;
+                        }
+                    } else {
+                        debugLog('app.js:235', 'Periodic check detected exhausted buffer but cooldown active', {
+                            currentStreamId,
+                            bufferAhead:bufferAhead,
+                            readyState:stream.readyState,
+                            timeSinceLastReload: now - lastReloadTime,
+                            cooldownRemaining: RELOAD_COOLDOWN_MS - (now - lastReloadTime)
+                        }, 'A');
+                    }
                 }
             }
             // #endregion
         }, 5000); // Check every 5 seconds
     }
     // #endregion
-}
+*/
+    }
 
 // Show/hide back button based on current URL
 function updateBackButtonVisibility() {
@@ -657,10 +786,6 @@ async function ensureLiveStreamSource(){
     if (!stream) return;
     const sourceEl = stream.getElementsByTagName('source')[0];
     if (!sourceEl) return;
-    
-    // #region agent log
-    debugLog('app.js:257', 'ensureLiveStreamSource() called', {sourceCount:stream.getElementsByTagName('source').length,currentSrc:sourceEl.getAttribute('src'),paused:stream.paused,readyState:stream.readyState}, 'B');
-    // #endregion
     
     const currentSrc = sourceEl.getAttribute('src');
     
@@ -759,6 +884,7 @@ stream.addEventListener("stalled", function() {
             bufferAhead: bufferedEnd - (stream.currentTime || 0)
         };
     }
+    else{return;}
     
     debugLog('app.js:340', 'Audio stalled event', {
         paused:stream.paused,
@@ -768,6 +894,11 @@ stream.addEventListener("stalled", function() {
         currentTime:stream.currentTime,
         ...bufferInfo
     }, 'A');
+    
+    // Show loading indicator when stalled
+    if (!stream.paused) {
+        showLoadingIndicator();
+    }
     
     // #region agent log - Recovery attempt
     // If stream is stalled but not paused, try to recover
@@ -807,8 +938,21 @@ stream.addEventListener("stalled", function() {
     }
     
     function performStreamReload() {
-        if (isLoading) return;
+        const now = Date.now();
+        if (isLoading) {
+            debugLog('app.js:839', 'Reload skipped - already loading', {}, 'A');
+            return;
+        }
+        if ((now - lastReloadTime) < RELOAD_COOLDOWN_MS) {
+            debugLog('app.js:839', 'Reload skipped - cooldown active', {
+                timeSinceLastReload: now - lastReloadTime,
+                cooldownRemaining: RELOAD_COOLDOWN_MS - (now - lastReloadTime)
+            }, 'A');
+            return;
+        }
+        
         isLoading = true;
+        lastReloadTime = now;
         debugLog('app.js:375', 'Stalled stream not recovered, reloading', {
             currentStreamId,
             readyState:stream.readyState,
@@ -831,14 +975,51 @@ stream.addEventListener("stalled", function() {
     // #endregion
 });
 stream.addEventListener("waiting", function() {
-    debugLog('app.js:343', 'Audio waiting event', {paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState,src:stream.getElementsByTagName('source')[0]?.getAttribute('src')}, 'A');
+    // Get buffer information at waiting time
+    let bufferInfo = null;
+    if (stream.buffered && stream.buffered.length > 0) {
+        const bufferedEnd = stream.buffered.end(stream.buffered.length - 1);
+        const bufferedStart = stream.buffered.start(0);
+        bufferInfo = {
+            bufferedRanges: stream.buffered.length,
+            bufferedStart: bufferedStart,
+            bufferedEnd: bufferedEnd,
+            bufferedDuration: bufferedEnd - bufferedStart,
+            bufferAhead: bufferedEnd - (stream.currentTime || 0)
+        };
+    }
+    
+    debugLog('app.js:343', 'Audio waiting event', {
+        paused:stream.paused,
+        readyState:stream.readyState,
+        networkState:stream.networkState,
+        src:stream.getElementsByTagName('source')[0]?.getAttribute('src'),
+        currentTime:stream.currentTime,
+        ...bufferInfo
+    }, 'A');
+    
+    // Show loading indicator when buffering
+    if (!stream.paused) {
+        showLoadingIndicator();
+    }
+    
+    // #region agent log - Removed proactive reload from waiting event
+    // Let stalled/ended events handle recovery to avoid reload loops on slow connections
+    // The waiting event is just a warning that buffer is low, not necessarily exhausted
+    // #endregion
 });
 stream.addEventListener("loadstart", function() {
     debugLog('app.js:346', 'Audio loadstart event', {paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState,src:stream.getElementsByTagName('source')[0]?.getAttribute('src')}, 'C');
+    // Show loading indicator when starting to load
+    if (!stream.paused) {
+        showLoadingIndicator();
+    }
 });
 stream.addEventListener("canplay", function() {
     isLoading = false; // Reset loading flag when stream can play
     debugLog('app.js:349', 'Audio canplay event - reset isLoading', {paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState}, 'C');
+    // Hide loading indicator when ready to play
+    hideLoadingIndicator();
 });
 stream.addEventListener("ended", function() {
     // Get buffer information at end time
@@ -866,27 +1047,41 @@ stream.addEventListener("ended", function() {
     }, 'A');
     
     // #region agent log - Live stream ended recovery
-    // For live streams, "ended" means the buffer ran out - we need to reload
+    // For live streams, "ended" means the buffer ran out - we need to reload (with cooldown)
     if (currentStreamId && !isLoading) {
-        debugLog('app.js:380', 'Live stream ended - reloading', {
-            currentStreamId,
-            readyState:stream.readyState,
-            bufferAhead:bufferInfo ? bufferInfo.bufferAhead : 0
-        }, 'A');
+        const now = Date.now();
+        const bufferAhead = bufferInfo ? bufferInfo.bufferAhead : 0;
         
-        isLoading = true;
-        const sourceEl = stream.getElementsByTagName('source')[0];
-        if (sourceEl && currentStreamId) {
-            const wasPlaying = !stream.paused;
-            stream.pause();
-            sourceEl.setAttribute('src', STREAM_CONFIG[currentStreamId].url);
-            stream.load();
-            setTimeout(() => { isLoading = false; }, 1000);
-            if (wasPlaying) {
-                stream.play().catch(() => {});
+        if ((now - lastReloadTime) >= RELOAD_COOLDOWN_MS) {
+            debugLog('app.js:380', 'Live stream ended - reloading', {
+                currentStreamId,
+                readyState:stream.readyState,
+                bufferAhead:bufferAhead,
+                timeSinceLastReload: now - lastReloadTime
+            }, 'A');
+            
+            isLoading = true;
+            lastReloadTime = now;
+            const sourceEl = stream.getElementsByTagName('source')[0];
+            if (sourceEl && currentStreamId) {
+                const wasPlaying = !stream.paused;
+                stream.pause();
+                sourceEl.setAttribute('src', STREAM_CONFIG[currentStreamId].url);
+                stream.load();
+                setTimeout(() => { isLoading = false; }, 1000);
+                if (wasPlaying) {
+                    stream.play().catch(() => {});
+                }
+            } else {
+                isLoading = false;
             }
         } else {
-            isLoading = false;
+            debugLog('app.js:380', 'Live stream ended but cooldown active', {
+                currentStreamId,
+                bufferAhead:bufferAhead,
+                timeSinceLastReload: now - lastReloadTime,
+                cooldownRemaining: RELOAD_COOLDOWN_MS - (now - lastReloadTime)
+            }, 'A');
         }
     }
     // #endregion
@@ -1115,6 +1310,10 @@ function playStream(){
     const playPromise = stream.play();
     playPromise.then(() => {
         debugLog('app.js:567', 'playStream() - play() resolved', {paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState}, 'E');
+        // Hide loading indicator if readyState is good
+        if (stream.readyState >= 3) {
+            hideLoadingIndicator();
+        }
     }).catch((err) => {
         debugLog('app.js:569', 'playStream() - play() rejected', {error:err.message,paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState}, 'E');
     });
@@ -1130,7 +1329,9 @@ function pauseStream(){
     
     removeClass("bar-play-button", "playing");
     stream.pause();
-    clearInterval(scrubUpdater)
+    clearInterval(scrubUpdater);
+    // Hide loading indicator when paused
+    hideLoadingIndicator();
 }
 
 // Helper function to update Media Session metadata for episodes
@@ -1457,19 +1658,11 @@ function shareUrl(url, title){
     var email = document.getElementById("email-share")
     var titleSpan = document.getElementById("share-title")
 
-    if (!dialog || !fb || !wa || !twitter || !email) {
-        console.warn('Share dialog elements not found');
-        return;
-    }
-
     fb.href = "https://www.facebook.com/sharer/sharer.php?u=" + encodeURI(url)
     wa.href = "whatsapp://send?text=" + url
     twitter.href = "https://twitter.com/intent/tweet?text=" + encodeURI(url)
     email.href = "mailto:?subject=Veja%20o%20que%20eu%20descrobi!&body=" + url
-    
-    if (titleSpan) {
-        titleSpan.innerHTML = title
-    }
+    titleSpan.innerHTML = title
 
     dialog.classList.remove("hidden")
     disableScrolling();
