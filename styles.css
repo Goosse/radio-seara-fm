@@ -1003,6 +1003,15 @@ iframe {
   font-family: Montserrat;
 }
 
+.buffer-debug {
+  display: inline-block;
+  font-size: 0.75em;
+  color: #949494;
+  margin-left: 8px;
+  font-family: monospace;
+  opacity: 0.7;
+}
+
 .scrub-time {
   position: absolute;
   right: 0;

@@ -776,6 +776,9 @@ stream.addEventListener("stalled", function() {
         ...bufferInfo
     }, 'A');
     
+    // Update buffer debug display
+    updateBufferDebug();
+    
     // Show loading indicator when stalled
     if (!stream.paused) {
         showLoadingIndicator();
@@ -895,6 +898,9 @@ stream.addEventListener("waiting", function() {
         ...bufferInfo
     }, 'A');
     
+    // Update buffer debug display
+    updateBufferDebug();
+    
     // Show loading indicator when buffering
     if (!stream.paused) {
         showLoadingIndicator();
@@ -938,6 +944,8 @@ stream.addEventListener("canplay", function() {
     debugLog('app.js:349', 'Audio canplay event - reset isLoading', {paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState}, 'C');
     // Hide loading indicator when ready to play
     hideLoadingIndicator();
+    // Update buffer debug display
+    updateBufferDebug();
     
     // If we have a live stream that should be playing but is paused, try to resume
     if (currentStreamId) {
@@ -1585,6 +1593,22 @@ function updateScrubber(){
     displayFormattedCurrentTime(stream.currentTime)
     streamingAnalytics(stream.currentTime, streamFullTime)
     }
+    // Update buffer debug display
+    updateBufferDebug();
+}
+
+function updateBufferDebug() {
+    const bufferDebugEl = document.getElementById('buffer-debug');
+    if (!bufferDebugEl) return;
+    
+    let bufferAhead = 0;
+    if (stream.buffered && stream.buffered.length > 0) {
+        const bufferedEnd = stream.buffered.end(stream.buffered.length - 1);
+        bufferAhead = bufferedEnd - (stream.currentTime || 0);
+    }
+    
+    // Format to 1 decimal place
+    bufferDebugEl.textContent = bufferAhead.toFixed(1) + 's';
 }
 
 function displayFormattedCurrentTime(seconds){
