@@ -35,8 +35,7 @@ async function downloadResource(url, filename, button) {
     while(true) {
       const {done, value} = await reader.read();
 
-      if (done) {
-        plausible('Download', {props: {file: filename.split('/').pop()}})
+      if (done) { 
         break;
       }
 
