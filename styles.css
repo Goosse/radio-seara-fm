@@ -1060,13 +1060,13 @@ iframe {
 
 @keyframes spinner-dash {
   0% {
-    stroke-dashoffset: 182;
+    stroke-dasharray: 0 182;
   }
   50% {
-    stroke-dashoffset: 0;
+    stroke-dasharray: 182 0;
   }
   100% {
-    stroke-dashoffset: -182;
+    stroke-dasharray: 182 182;
   }
 }
 @media only screen and (min-width: 768px) {

@@ -1,379 +1,3 @@
- //Mark: Debug Logging with Sentry
-// Configure your Sentry DSN here (get it from https://sentry.io)
-const SENTRY_DSN = 'https://57591e4d3698015d44d524db1aa52f2d@o4510596844879872.ingest.us.sentry.io/4510596854579200'; // Set your Sentry DSN here, e.g., 'https://xxxxx@xxxxx.ingest.sentry.io/xxxxx'
-const MAX_LOG_ENTRIES = 1000; // Limit localStorage size
-const SENTRY_BATCH_SIZE = 10; // Send logs to Sentry in batches
-const SENTRY_BATCH_INTERVAL = 10000; // Send batch every 10 seconds
-
-let sentryLogQueue = [];
-let lastSentrySend = 0;
-
-let sessionId = localStorage.getItem('debugSessionId') || 'session-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
-if (!localStorage.getItem('debugSessionId')) {
-    localStorage.setItem('debugSessionId', sessionId);
-}
-
-// Initialize Sentry if DSN is configured
-let sentryInitialized = false;
-function initializeSentry() {
-    if (sentryInitialized || !SENTRY_DSN) return;
-    
-    // Wait for Sentry to be available
-    if (window.Sentry) {
-        try {
-            window.Sentry.init({
-                dsn: SENTRY_DSN,
-                environment: window.location.hostname.includes('netlify.app') ? 'preview' : 'production',
-                tracesSampleRate: 1.0, // Capture 100% of transactions for debugging
-                beforeSend(event, hint) {
-                    // Add session ID to all events
-                    event.tags = event.tags || {};
-                    event.tags.sessionId = sessionId;
-                    return event;
-                }
-            });
-            
-            // Set user context
-            window.Sentry.setUser({
-                id: sessionId,
-                username: `session-${sessionId}`
-            });
-            
-            // Set device context
-            window.Sentry.setContext('device', {
-                userAgent: navigator.userAgent,
-                platform: navigator.platform,
-                language: navigator.language,
-                screenWidth: window.screen.width,
-                screenHeight: window.screen.height,
-                connectionType: navigator.connection?.effectiveType || 'unknown',
-                url: window.location.href
-            });
-            
-            sentryInitialized = true;
-            console.log('[DEBUG] Sentry initialized');
-        } catch (e) {
-            console.error('[DEBUG] Sentry initialization failed:', e);
-        }
-    } else {
-        // Retry after a short delay if Sentry isn't loaded yet
-        setTimeout(initializeSentry, 100);
-    }
-}
-
-// Try to initialize Sentry when DOM is ready
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initializeSentry);
-} else {
-    initializeSentry();
-}
-
-// Also try immediately and after a delay
-initializeSentry();
-setTimeout(initializeSentry, 500);
-
-function debugLog(location, message, data, hypothesisId) {
-    const logData = {
-        location, 
-        message, 
-        data, 
-        timestamp: Date.now(), 
-        sessionId: sessionId, 
-        runId: 'run1', 
-        hypothesisId
-    };
-    console.log('[DEBUG]', logData); // Console fallback
-    
-    // Store in localStorage (backup)
-    try {
-        let logs = JSON.parse(localStorage.getItem('debugLogs') || '[]');
-        logs.push(logData);
-        // Keep only last MAX_LOG_ENTRIES
-        if (logs.length > MAX_LOG_ENTRIES) {
-            logs = logs.slice(-MAX_LOG_ENTRIES);
-        }
-        localStorage.setItem('debugLogs', JSON.stringify(logs));
-    } catch (e) {
-        console.warn('[DEBUG] localStorage write failed:', e);
-    }
-    
-    // Queue for Sentry if available
-    if (SENTRY_DSN) {
-        sentryLogQueue.push(logData);
-        
-        // Send immediately for important events
-        const isImportant = message.includes('error') || 
-                           message.includes('stalled') || 
-                           message.includes('rejected') ||
-                           message.includes('recovery');
-        
-        const now = Date.now();
-        const shouldSend = isImportant || 
-                          sentryLogQueue.length >= SENTRY_BATCH_SIZE || 
-                          (now - lastSentrySend) >= SENTRY_BATCH_INTERVAL;
-        
-        if (shouldSend && sentryLogQueue.length > 0) {
-            sendSentryBatch();
-        }
-    }
-}
-
-// Send batched logs to Sentry
-function sendSentryBatch() {
-    if (!window.Sentry || !SENTRY_DSN || !sentryInitialized || sentryLogQueue.length === 0) {
-        // Retry initialization if needed
-        if (SENTRY_DSN && !sentryInitialized) {
-            initializeSentry();
-        }
-        return;
-    }
-    
-    const logsToSend = [...sentryLogQueue];
-    sentryLogQueue = [];
-    lastSentrySend = Date.now();
-    
-    try {
-        
-        // Send each log as a breadcrumb
-        logsToSend.forEach(log => {
-            window.Sentry.addBreadcrumb({
-                category: 'debug',
-                message: log.message,
-                level: 'info',
-                data: {
-                    location: log.location,
-                    hypothesisId: log.hypothesisId,
-                    ...log.data
-                },
-                timestamp: log.timestamp / 1000
-            });
-        });
-        
-        // Send as a single event with all logs
-        const importantLogs = logsToSend.filter(log => 
-            log.message.includes('error') || 
-            log.message.includes('stalled') || 
-            log.message.includes('rejected')
-        );
-        
-        if (importantLogs.length > 0) {
-            // Send important logs as individual events
-            importantLogs.forEach(log => {
-                // Serialize data properly
-                const serializedData = {};
-                if (log.data && typeof log.data === 'object') {
-                    try {
-                        Object.keys(log.data).forEach(key => {
-                            const value = log.data[key];
-                            if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
-                                serializedData[key] = JSON.parse(JSON.stringify(value));
-                            } else {
-                                serializedData[key] = value;
-                            }
-                        });
-                    } catch (e) {
-                        serializedData._serializationError = e.message;
-                        serializedData._rawData = String(log.data);
-                    }
-                } else {
-                    serializedData = log.data;
-                }
-                
-                window.Sentry.captureMessage(`[${log.hypothesisId}] ${log.message}`, {
-                    level: 'warning',
-                    tags: {
-                        location: log.location,
-                        hypothesisId: log.hypothesisId,
-                        sessionId: sessionId,
-                        logType: 'debug'
-                    },
-                    extra: {
-                        ...serializedData,
-                        timestamp: log.timestamp,
-                        fullLog: {
-                            message: log.message,
-                            location: log.location,
-                            hypothesisId: log.hypothesisId
-                        }
-                    }
-                });
-            });
-        } else {
-            // Send batch summary for non-critical logs
-            window.Sentry.captureMessage(`Debug Log Batch (${logsToSend.length} entries)`, {
-                level: 'info',
-                tags: {
-                    sessionId: sessionId,
-                    logType: 'debug-batch',
-                    batchSize: logsToSend.length
-                },
-                extra: {
-                    logs: logsToSend.map(log => {
-                        // Properly serialize the data object
-                        const serializedData = {};
-                        if (log.data && typeof log.data === 'object') {
-                            try {
-                                // Deep clone and serialize the data object
-                                Object.keys(log.data).forEach(key => {
-                                    const value = log.data[key];
-                                    if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
-                                        serializedData[key] = JSON.parse(JSON.stringify(value));
-                                    } else {
-                                        serializedData[key] = value;
-                                    }
-                                });
-                            } catch (e) {
-                                serializedData._serializationError = e.message;
-                                serializedData._rawData = String(log.data);
-                            }
-                        } else {
-                            serializedData = log.data;
-                        }
-                        
-                        return {
-                            message: log.message,
-                            location: log.location,
-                            hypothesisId: log.hypothesisId,
-                            timestamp: log.timestamp,
-                            data: serializedData
-                        };
-                    })
-                }
-            });
-        }
-    } catch (e) {
-        console.warn('[DEBUG] Sentry batch send failed:', e);
-        // Put logs back in queue if send failed
-        if (sentryLogQueue.length < MAX_LOG_ENTRIES) {
-            sentryLogQueue = [...logsToSend, ...sentryLogQueue].slice(0, MAX_LOG_ENTRIES);
-        }
-    }
-}
-
-// Send logs periodically
-setInterval(() => {
-    if (sentryLogQueue.length > 0) {
-        sendSentryBatch();
-    }
-}, SENTRY_BATCH_INTERVAL);
-
-// Send logs on page unload
-window.addEventListener('beforeunload', () => {
-    if (sentryLogQueue.length > 0) {
-        sendSentryBatch();
-    }
-});
-
-// Export function to retrieve logs (call from console: getDebugLogs())
-window.getDebugLogs = function() {
-    try {
-        const logs = JSON.parse(localStorage.getItem('debugLogs') || '[]');
-        console.log(`Retrieved ${logs.length} log entries`);
-        return logs;
-    } catch (e) {
-        console.error('Failed to retrieve logs:', e);
-        return [];
-    }
-};
-
-// Export function to clear logs (call from console: clearDebugLogs())
-window.clearDebugLogs = function() {
-    localStorage.removeItem('debugLogs');
-    console.log('Debug logs cleared');
-};
-
-// Export function to analyze logs for stream stop issues
-window.analyzeDebugLogs = function() {
-    try {
-        const logs = JSON.parse(localStorage.getItem('debugLogs') || '[]');
-        console.log(`Analyzing ${logs.length} log entries...`);
-        
-        // Find all periodic checks and look for state changes
-        const periodicChecks = logs.filter(log => log.message === 'Periodic audio state check');
-        const stalledEvents = logs.filter(log => log.message === 'Audio stalled event');
-        const errorEvents = logs.filter(log => log.message === 'Audio error event');
-        const waitingEvents = logs.filter(log => log.message === 'Audio waiting event');
-        
-        console.log('\n=== Analysis Results ===');
-        console.log(`Periodic checks: ${periodicChecks.length}`);
-        console.log(`Stalled events: ${stalledEvents.length}`);
-        console.log(`Error events: ${errorEvents.length}`);
-        console.log(`Waiting events: ${waitingEvents.length}`);
-        
-        // Find transitions from playing to not playing
-        let lastPlayingState = null;
-        const stateTransitions = [];
-        periodicChecks.forEach((log, index) => {
-            const wasPlaying = !log.data.paused;
-            if (lastPlayingState !== null && lastPlayingState !== wasPlaying) {
-                stateTransitions.push({
-                    index: index,
-                    timestamp: log.timestamp,
-                    from: lastPlayingState ? 'playing' : 'paused',
-                    to: wasPlaying ? 'playing' : 'paused',
-                    readyState: log.data.readyState,
-                    networkState: log.data.networkState,
-                    error: log.data.error
-                });
-            }
-            lastPlayingState = wasPlaying;
-        });
-        
-        if (stateTransitions.length > 0) {
-            console.log('\n=== State Transitions ===');
-            stateTransitions.forEach(t => {
-                console.log(`Transition ${t.from} -> ${t.to} at ${new Date(t.timestamp).toLocaleTimeString()}, readyState: ${t.readyState}, networkState: ${t.networkState}`);
-            });
-        }
-        
-        // Check for stalled events with details
-        if (stalledEvents.length > 0) {
-            console.log('\n=== Stalled Events ===');
-            stalledEvents.forEach((log, i) => {
-                console.log(`Stalled event ${i+1} at ${new Date(log.timestamp).toLocaleTimeString()}:`, log.data);
-            });
-        }
-        
-        // Check for error events
-        if (errorEvents.length > 0) {
-            console.log('\n=== Error Events ===');
-            errorEvents.forEach((log, i) => {
-                console.log(`Error event ${i+1} at ${new Date(log.timestamp).toLocaleTimeString()}:`, log.data);
-            });
-        }
-        
-        // Find cases where paused=false but readyState/networkState suggest issues
-        const suspiciousStates = periodicChecks.filter(log => {
-            return !log.data.paused && 
-                   (log.data.readyState < 3 || log.data.networkState !== 2);
-        });
-        
-        if (suspiciousStates.length > 0) {
-            console.log('\n=== Suspicious States (playing but not ready) ===');
-            suspiciousStates.slice(0, 5).forEach(log => {
-                console.log(`At ${new Date(log.timestamp).toLocaleTimeString()}:`, {
-                    paused: log.data.paused,
-                    readyState: log.data.readyState,
-                    networkState: log.data.networkState,
-                    error: log.data.error
-                });
-            });
-        }
-        
-        return {
-            totalLogs: logs.length,
-            periodicChecks: periodicChecks.length,
-            stalledEvents: stalledEvents.length,
-            errorEvents: errorEvents.length,
-            stateTransitions: stateTransitions,
-            suspiciousStates: suspiciousStates.length
-        };
-    } catch (e) {
-        console.error('Failed to analyze logs:', e);
-        return null;
-    }
-};
-
 //Mark: Service Worker
 const registerServiceWorker = async () => {
   if ("serviceWorker" in navigator) {
@@ -403,8 +27,6 @@ function shouldAutoplayYouTube() {
             return true;
         }
     }
-    
-    // Fallback: check if on WiFi (connection type might not be available)
     // Default to no autoplay for slower connections
     return false;
 }
@@ -521,24 +143,19 @@ updateBackButtonVisibility();
 
 const STREAM_CONFIG = {
     '102': {
-        url: 'https://radioseara.fm/stream102',
-        name: 'Nova Russas 102,7',
+        url: 'https://audio-edge-es6pf.mia.g.radiomast.io/ref-64k-heaacv2-stereo', //'https://radioseara.fm/stream102'
+        name: 'HTTP Stream (Icecast)',
         coords: { lat: -4.707070, lon: -40.563689 }
     },
     '104': {
-        url: 'https://radioseara.fm/stream104',
-        name: 'Ibiapina 104,7',
+        url: 'https://audio-edge-es6pf.mia.g.radiomast.io/ref-64k-heaacv2-stereo/hls.m3u8', //'https://radioseara.fm/stream104'
+        name: 'HLS Stream',
         coords: { lat: -3.944082, lon: -40.849463 }
     }
 };
 
 const LIVE_STREAM_ARTWORK = 'https://radioseara.fm/recursos/capas/semmarca/ao-vivo.webp';
-let currentStreamId = null; // Track active stream ID ('102' or '104')
 let isLoading = false; // Prevent multiple simultaneous load() calls
-let lastReloadTime = 0; // Track last reload time to prevent reload loops
-const RELOAD_COOLDOWN_MS = 20000; // 20 seconds minimum between reloads
-let waitingStartTime = null; // Track when waiting event started
-const WAITING_TIMEOUT_MS = 10000; // 10 seconds - if stuck in waiting, reload
 
 // Loading indicator management (only for bar player)
 function showLoadingIndicator() {
@@ -663,39 +280,6 @@ const defaultLiveProgram = {
     description: 'Acompanhe a transmissão ao vivo e fique por dentro da nossa programação.'
 };
 
-async function ensureLiveStreamSource(){
-    if (!stream) return;
-    const sourceEl = stream.getElementsByTagName('source')[0];
-    if (!sourceEl) return;
-    
-    const currentSrc = sourceEl.getAttribute('src');
-    
-    // Detect which stream is currently set (if any)
-    if (currentSrc) {
-        if (currentSrc.includes('stream102')) {
-            currentStreamId = '102';
-        } else if (currentSrc.includes('stream104')) {
-            currentStreamId = '104';
-        }
-    }
-    
-    // Only set default if no source is set and we're not already playing
-    if (!currentSrc && !currentStreamId && !isLoading) {
-        isLoading = true;
-        const defaultStreamId = await determineClosestStream();
-        currentStreamId = defaultStreamId;
-        sourceEl.setAttribute('src', STREAM_CONFIG[defaultStreamId].url);
-        
-        // #region agent log
-        debugLog('app.js:285', 'ensureLiveStreamSource() - calling load()', {src:STREAM_CONFIG[defaultStreamId].url,sourceCount:stream.getElementsByTagName('source').length}, 'C');
-        // #endregion
-        
-        stream.load();
-        
-        // Reset loading flag after a short delay
-        setTimeout(() => { isLoading = false; }, 1000);
-    }
-}
 
 function timeToMinutes(time){
     const [hours, minutes] = time.split(':').map(Number);
@@ -740,199 +324,8 @@ var streamTitle = '';
 var scrubUpdater
 stream.volume = 0.5;
 
-// #region agent log
-// Track audio element state and events for debugging stream stops
-stream.addEventListener("play", function() {
-    debugLog('app.js:309', 'Audio play event', {paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState,src:stream.getElementsByTagName('source')[0]?.getAttribute('src')}, 'A');
-});
-stream.addEventListener("pause", function() {
-    debugLog('app.js:334', 'Audio pause event', {paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState,src:stream.getElementsByTagName('source')[0]?.getAttribute('src')}, 'A');
-});
-stream.addEventListener("error", function(e) {
-    debugLog('app.js:337', 'Audio error event', {paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState,error:stream.error?.code,errorMessage:stream.error?.message,src:stream.getElementsByTagName('source')[0]?.getAttribute('src')}, 'D');
-});
-stream.addEventListener("stalled", function() {
-    // Get buffer information at stall time
-    let bufferInfo = null;
-    if (stream.buffered && stream.buffered.length > 0) {
-        const bufferedEnd = stream.buffered.end(stream.buffered.length - 1);
-        const bufferedStart = stream.buffered.start(0);
-        bufferInfo = {
-            bufferedRanges: stream.buffered.length,
-            bufferedStart: bufferedStart,
-            bufferedEnd: bufferedEnd,
-            bufferedDuration: bufferedEnd - bufferedStart,
-            bufferAhead: bufferedEnd - (stream.currentTime || 0)
-        };
-    }
-    else{return;}
-    
-    debugLog('app.js:340', 'Audio stalled event', {
-        paused:stream.paused,
-        readyState:stream.readyState,
-        networkState:stream.networkState,
-        src:stream.getElementsByTagName('source')[0]?.getAttribute('src'),
-        currentTime:stream.currentTime,
-        ...bufferInfo
-    }, 'A');
-    
-    // Update buffer debug display
-    updateBufferDebug();
-    
-    // Show loading indicator when stalled
-    if (!stream.paused) {
-        showLoadingIndicator();
-    }
-    
-    // #region agent log - Recovery attempt
-    // If stream is stalled but not paused, try to recover
-    if (!stream.paused && currentStreamId) {
-        const bufferAhead = bufferInfo ? bufferInfo.bufferAhead : 0;
-        const hasBuffer = bufferAhead > 0.5; // At least 0.5 seconds of buffer
-        
-        debugLog('app.js:343', 'Attempting stalled stream recovery', {
-            currentStreamId,
-            paused:stream.paused,
-            readyState:stream.readyState,
-            bufferAhead:bufferAhead,
-            hasBuffer:hasBuffer
-        }, 'A');
-        
-        // If we have buffer, try a simple play() first
-        // If buffer is low or readyState is low, reload the stream
-        if (hasBuffer && stream.readyState >= 3) {
-            // Try to resume playback - browser might have paused it internally
-            stream.play().catch((err) => {
-                debugLog('app.js:360', 'play() failed after stall, will reload', {error:err.message, readyState:stream.readyState}, 'A');
-                // If play() fails, fall through to reload logic
-                setTimeout(() => {
-                    if (!stream.paused && currentStreamId && !isLoading) {
-                        performStreamReload();
-                    }
-                }, 1000);
-            });
-        } else {
-            // Low buffer or low readyState - reload the stream
-            setTimeout(() => {
-                if (!stream.paused && currentStreamId && !isLoading) {
-                    performStreamReload();
-                }
-            }, 2000);
-        }
-    }
-    // #endregion
-});
-
-// Reload stream function (accessible from multiple event handlers)
-function performStreamReload() {
-    const now = Date.now();
-    if (isLoading) {
-        debugLog('app.js:839', 'Reload skipped - already loading', {}, 'A');
-        return;
-    }
-    if ((now - lastReloadTime) < RELOAD_COOLDOWN_MS) {
-        debugLog('app.js:839', 'Reload skipped - cooldown active', {
-            timeSinceLastReload: now - lastReloadTime,
-            cooldownRemaining: RELOAD_COOLDOWN_MS - (now - lastReloadTime)
-        }, 'A');
-        return;
-    }
-    
-    isLoading = true;
-    lastReloadTime = now;
-    
-    // Get buffer info for logging
-    let bufferInfo = null;
-    if (stream.buffered && stream.buffered.length > 0) {
-        const bufferedEnd = stream.buffered.end(stream.buffered.length - 1);
-        const bufferedStart = stream.buffered.start(0);
-        bufferInfo = {
-            bufferedRanges: stream.buffered.length,
-            bufferedStart: bufferedStart,
-            bufferedEnd: bufferedEnd,
-            bufferedDuration: bufferedEnd - bufferedStart,
-            bufferAhead: bufferedEnd - (stream.currentTime || 0)
-        };
-    }
-    
-    debugLog('app.js:375', 'Stalled stream not recovered, reloading', {
-        currentStreamId,
-        readyState:stream.readyState,
-        bufferAhead:bufferInfo ? bufferInfo.bufferAhead : 0
-    }, 'A');
-    const sourceEl = stream.getElementsByTagName('source')[0];
-    if (sourceEl && currentStreamId) {
-        const wasPlaying = !stream.paused;
-        stream.pause();
-        sourceEl.setAttribute('src', STREAM_CONFIG[currentStreamId].url);
-        stream.load();
-        setTimeout(() => { isLoading = false; }, 1000);
-        if (wasPlaying) {
-            stream.play().catch(() => {});
-        }
-    } else {
-        isLoading = false;
-    }
-}
-stream.addEventListener("waiting", function() {
-    // Get buffer information at waiting time
-    let bufferInfo = null;
-    if (stream.buffered && stream.buffered.length > 0) {
-        const bufferedEnd = stream.buffered.end(stream.buffered.length - 1);
-        const bufferedStart = stream.buffered.start(0);
-        bufferInfo = {
-            bufferedRanges: stream.buffered.length,
-            bufferedStart: bufferedStart,
-            bufferedEnd: bufferedEnd,
-            bufferedDuration: bufferedEnd - bufferedStart,
-            bufferAhead: bufferedEnd - (stream.currentTime || 0)
-        };
-    }
-    
-    debugLog('app.js:343', 'Audio waiting event', {
-        paused:stream.paused,
-        readyState:stream.readyState,
-        networkState:stream.networkState,
-        src:stream.getElementsByTagName('source')[0]?.getAttribute('src'),
-        currentTime:stream.currentTime,
-        ...bufferInfo
-    }, 'A');
-    
-    // Update buffer debug display
-    updateBufferDebug();
-    
-    // Show loading indicator when buffering
-    if (!stream.paused) {
-        showLoadingIndicator();
-    }
-    
-    // Track when waiting started
-    if (!waitingStartTime) {
-        waitingStartTime = Date.now();
-        
-        // If stuck in waiting too long, reload the stream
-        setTimeout(() => {
-            if (waitingStartTime && (Date.now() - waitingStartTime) >= WAITING_TIMEOUT_MS) {
-                if (currentStreamId && !stream.paused && !isLoading) {
-                    debugLog('app.js:343', 'Stream stuck in waiting state too long - reloading', {
-                        waitingDuration: Date.now() - waitingStartTime,
-                        readyState: stream.readyState,
-                        networkState: stream.networkState
-                    }, 'A');
-                    performStreamReload();
-                }
-                waitingStartTime = null;
-            }
-        }, WAITING_TIMEOUT_MS);
-    }
-    
-    // #region agent log - Removed proactive reload from waiting event
-    // Let stalled/ended events handle recovery to avoid reload loops on slow connections
-    // The waiting event is just a warning that buffer is low, not necessarily exhausted
-    // #endregion
-});
 stream.addEventListener("loadstart", function() {
-    debugLog('app.js:346', 'Audio loadstart event', {paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState,src:stream.getElementsByTagName('source')[0]?.getAttribute('src')}, 'C');
+    console.log('Audio loadstart event');
     // Show loading indicator when starting to load
     if (!stream.paused) {
         showLoadingIndicator();
@@ -940,199 +333,13 @@ stream.addEventListener("loadstart", function() {
 });
 stream.addEventListener("canplay", function() {
     isLoading = false; // Reset loading flag when stream can play
-    waitingStartTime = null; // Reset waiting timer when stream can play
-    debugLog('app.js:349', 'Audio canplay event - reset isLoading', {paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState}, 'C');
+    console.log('Audio canplay event - reset isLoading');
     // Hide loading indicator when ready to play
     hideLoadingIndicator();
-    // Update buffer debug display
-    updateBufferDebug();
-    
-    // If we have a live stream that should be playing but is paused, try to resume
-    if (currentStreamId) {
-        const playButton = document.getElementById('bar-play-button');
-        const shouldBePlaying = playButton && playButton.classList.contains('playing');
-        
-        if (shouldBePlaying && stream.paused && navigator.onLine) {
-            debugLog('app.js:349', 'Stream can play and should be playing - attempting to resume', {
-                paused: stream.paused,
-                readyState: stream.readyState,
-                networkState: stream.networkState,
-                online: navigator.onLine
-            }, 'A');
-            setTimeout(() => {
-                if (currentStreamId && stream.paused && !isLoading) {
-                    stream.play().catch((err) => {
-                        debugLog('app.js:349', 'play() failed in canplay handler - reloading', {
-                            error: err.message,
-                            readyState: stream.readyState,
-                            networkState: stream.networkState
-                        }, 'A');
-                        if (!isLoading) {
-                            performStreamReload();
-                        }
-                    });
-                }
-            }, 100);
-        }
-    }
+
 });
 stream.addEventListener("ended", function() {
-    // Get buffer information at end time
-    let bufferInfo = null;
-    if (stream.buffered && stream.buffered.length > 0) {
-        const bufferedEnd = stream.buffered.end(stream.buffered.length - 1);
-        const bufferedStart = stream.buffered.start(0);
-        bufferInfo = {
-            bufferedRanges: stream.buffered.length,
-            bufferedStart: bufferedStart,
-            bufferedEnd: bufferedEnd,
-            bufferedDuration: bufferedEnd - bufferedStart,
-            bufferAhead: bufferedEnd - (stream.currentTime || 0)
-        };
-    }
-    
-    debugLog('app.js:365', 'Audio ended event', {
-        paused:stream.paused,
-        readyState:stream.readyState,
-        networkState:stream.networkState,
-        src:stream.getElementsByTagName('source')[0]?.getAttribute('src'),
-        currentTime:stream.currentTime,
-        currentStreamId:currentStreamId,
-        ...bufferInfo
-    }, 'A');
-    
-    // #region agent log - Live stream ended recovery
-    // For live streams, "ended" means the buffer ran out - we need to reload (with cooldown)
-    if (currentStreamId && !isLoading) {
-        const now = Date.now();
-        const bufferAhead = bufferInfo ? bufferInfo.bufferAhead : 0;
-        
-        if ((now - lastReloadTime) >= RELOAD_COOLDOWN_MS) {
-            debugLog('app.js:380', 'Live stream ended - reloading', {
-                currentStreamId,
-                readyState:stream.readyState,
-                bufferAhead:bufferAhead,
-                timeSinceLastReload: now - lastReloadTime
-            }, 'A');
-            
-            isLoading = true;
-            lastReloadTime = now;
-            const sourceEl = stream.getElementsByTagName('source')[0];
-            if (sourceEl && currentStreamId) {
-                const wasPlaying = !stream.paused;
-                stream.pause();
-                sourceEl.setAttribute('src', STREAM_CONFIG[currentStreamId].url);
-                stream.load();
-                setTimeout(() => { isLoading = false; }, 1000);
-                if (wasPlaying) {
-                    stream.play().catch(() => {});
-                }
-            } else {
-                isLoading = false;
-            }
-        } else {
-            debugLog('app.js:380', 'Live stream ended but cooldown active', {
-                currentStreamId,
-                bufferAhead:bufferAhead,
-                timeSinceLastReload: now - lastReloadTime,
-                cooldownRemaining: RELOAD_COOLDOWN_MS - (now - lastReloadTime)
-            }, 'A');
-        }
-    }
-    // #endregion
-});
-// #endregion
-
-// Network connectivity event listeners
-window.addEventListener('online', function() {
-    const playButton = document.getElementById('bar-play-button');
-    const shouldBePlaying = playButton && playButton.classList.contains('playing');
-    
-    debugLog('app.js:online', 'Network connectivity restored', {
-        currentStreamId,
-        paused: stream.paused,
-        readyState: stream.readyState,
-        networkState: stream.networkState,
-        shouldBePlaying: shouldBePlaying,
-        playButtonHasPlayingClass: shouldBePlaying,
-        isLoading: isLoading,
-        waitingStartTime: waitingStartTime
-    }, 'A');
-    
-    // Reset loading flags when connectivity is restored to allow recovery
-    if (currentStreamId) {
-        // Reset waiting timer since we're back online
-        waitingStartTime = null;
-        // If we've been stuck loading for a while, reset the flag
-        if (isLoading) {
-            debugLog('app.js:online', 'Resetting isLoading flag after connectivity restored', {}, 'A');
-            isLoading = false;
-        }
-    }
-    
-    // If we have a live stream, check if we need to recover
-    if (currentStreamId) {
-        const isInBadState = stream.networkState === 3 || // NETWORK_NO_SOURCE
-                            stream.readyState < 2 ||      // HAVE_NOTHING or HAVE_METADATA
-                            (stream.error && stream.error.code !== 0); // Has error
-        
-        // If the UI shows it should be playing, always check and recover if needed
-        if (shouldBePlaying) {
-            // If stream is paused or in bad state, reload it
-            if (stream.paused || isInBadState) {
-                debugLog('app.js:online', 'Stream should be playing but is paused or in bad state - reloading', {
-                    paused: stream.paused,
-                    readyState: stream.readyState,
-                    networkState: stream.networkState,
-                    error: stream.error?.code,
-                    shouldBePlaying: shouldBePlaying
-                }, 'A');
-                setTimeout(() => {
-                    if (currentStreamId && !isLoading) {
-                        performStreamReload();
-                    }
-                }, 1000);
-            }
-            // If stream claims to be playing but might be stuck, verify and reload if needed
-            // else if (!stream.paused) {
-            //     // Double-check: if readyState is low or networkState is questionable, reload anyway
-            //     if (stream.readyState < 3 || stream.networkState !== 2) {
-            //         debugLog('app.js:online', 'Stream playing but state questionable after connectivity restored - reloading', {
-            //             readyState: stream.readyState,
-            //             networkState: stream.networkState,
-            //             error: stream.error?.code
-            //         }, 'A');
-            //         setTimeout(() => {
-            //             if (currentStreamId && !isLoading) {
-            //                 performStreamReload();
-            //             }
-            //         }, 1000);
-            //     }
-            // }
-        }
-        // If stream is not paused but in bad state (even if UI doesn't show playing), reload it
-        else if (!stream.paused && isInBadState) {
-            debugLog('app.js:online', 'Stream playing but in bad state after connectivity restored - reloading', {
-                readyState: stream.readyState,
-                networkState: stream.networkState,
-                error: stream.error?.code
-            }, 'A');
-            setTimeout(() => {
-                if (currentStreamId && !isLoading) {
-                    performStreamReload();
-                }
-            }, 1000);
-        }
-    }
-});
-
-window.addEventListener('offline', function() {
-    debugLog('app.js:offline', 'Network connectivity lost', {
-        currentStreamId,
-        paused: stream.paused,
-        readyState: stream.readyState,
-        networkState: stream.networkState
-    }, 'A');
+    console.log('stream ended');
 });
 
 stream.addEventListener("volumechange", function() {
@@ -1180,116 +387,47 @@ if('mediaSession' in navigator) {
       }
   });
 }    
+async function playLiveStream(){
+    let streamId = await determineClosestStream();
+    switchStream(streamId);
+    showStreamToggle();
+    removeClass("bar-player-wrapper", "closed");
+    updateSliderVariables()
+    playStream();
+}
+
+async function switchStream(streamId){
     
-
-
-async function toggleLiveStream(playButton, streamId = null){
-    const buttonId = playButton && playButton.id ? playButton.id : 'live-stream-play-button';
-    if (!stream) return;
+    // #region agent log
+    console.log('switchStream() called');
+    // #endregion
+    
+    const wasPlaying = !stream.paused;
+    // Save preference to localStorage
+    localStorage.setItem('preferredStreamId', streamId);
 
     const sourceEl = stream.getElementsByTagName('source')[0];
     if (!sourceEl) return;
 
-    // Determine which stream to use
-    let targetStreamId = streamId;
-    if (!targetStreamId) {
-        if (currentStreamId) {
-            targetStreamId = currentStreamId;
-        } else {
-            targetStreamId = await determineClosestStream();
-        }
-    }
+    const targetStreamUrl = STREAM_CONFIG[streamId].url;
+  
+    sourceEl.setAttribute('src', targetStreamUrl);
+    streamFullTime = 0;
+    streamTitle = 'Rádio Seara Ao Vivo';
+    
+    console.log('Calling stream.load()');
+    stream.load();
 
-    const currentSrc = sourceEl.getAttribute('src');
-    const targetStreamUrl = STREAM_CONFIG[targetStreamId].url;
-    const switchingToLive = !currentSrc || (!currentSrc.includes('stream102') && !currentSrc.includes('stream104'));
-    const switchingStream = currentSrc !== targetStreamUrl;
-    // Reload if switching streams, or if currentStreamId doesn't match (including when it's null)
-    const needsReload = switchingToLive || switchingStream || !currentStreamId || currentStreamId !== targetStreamId;
-
-    if (needsReload && !isLoading) {
-        isLoading = true;
-        // #region agent log
-        debugLog('app.js:424', 'Before reload - checking for multiple sources', {sourceCount:stream.getElementsByTagName('source').length,currentSrc:sourceEl.getAttribute('src'),targetUrl:targetStreamUrl,paused:stream.paused,readyState:stream.readyState}, 'B');
-        // #endregion
-        
-        // Pause if currently playing
-        const wasPlaying = !stream.paused;
-        if (wasPlaying) {
-        stream.pause();
-    }
-        
-        sourceEl.setAttribute('src', targetStreamUrl);
-        currentStreamId = targetStreamId;
-        streamFullTime = 0;
-        streamTitle = 'Rádio Seara Ao Vivo';
-        
-        // #region agent log
-        debugLog('app.js:439', 'Calling stream.load()', {src:sourceEl.getAttribute('src'),paused:stream.paused,readyState:stream.readyState}, 'C');
-        // #endregion
-        stream.load();
-        
-        // Reset loading flag after a short delay
-        setTimeout(() => { isLoading = false; }, 1000);
-        
-        // Resume if was playing
-        if (wasPlaying) {
-            // #region agent log
-            const playPromise = stream.play();
-            playPromise.then(() => {
-                debugLog('app.js:448', 'stream.play() resolved', {paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState}, 'E');
-            }).catch((err) => {
-                debugLog('app.js:450', 'stream.play() rejected', {error:err.message,paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState}, 'E');
-            });
-            // #endregion
-        }
-    }
-
-    // Always update UI when playing live stream (even if source was already set)
-    if (!currentStreamId || currentStreamId !== targetStreamId) {
-        currentStreamId = targetStreamId;
-    }
-    updateLiveStreamUI(targetStreamId);
-
-    const shouldPlay = stream.paused || needsReload;
-
-    if (shouldPlay) {
-        removeClass("bar-player-wrapper", "closed");
-        showStreamToggle();
-        analyticsTriggered = 0;
+    // Resume if was playing
+    if (wasPlaying) {
+        console.log('switchStream() - stream was playing');
         playStream();
-    } else {
-        pauseStream();
     }
-}
-
-// Switch between streams (called from toggle buttons)
-function switchStream(streamId) {
-    if (currentStreamId === streamId) return;
-    
-    // #region agent log
-    debugLog('app.js:479', 'switchStream() called', {fromStreamId:currentStreamId,toStreamId:streamId,wasPlaying:!stream.paused,sourceCount:stream.getElementsByTagName('source').length}, 'B');
-    // #endregion
-    
-    // Save preference to localStorage
-    localStorage.setItem('preferredStreamId', streamId);
-    
-    const wasPlaying = !stream.paused;
-    toggleLiveStream(null, streamId);
-    
-    // If was playing, ensure it continues playing
-    if (wasPlaying && stream.paused) {
-        // #region agent log
-        const playPromise = stream.play();
-        playPromise.then(() => {
-            debugLog('app.js:493', 'switchStream() - play() resolved', {paused:stream.paused,readyState:stream.readyState}, 'E');
-        }).catch((err) => {
-            debugLog('app.js:495', 'switchStream() - play() rejected', {error:err.message,paused:stream.paused,readyState:stream.readyState}, 'E');
-        });
-        // #endregion
+    else{
+        console.log('switchStream() - stream was not playing');
     }
+    updateLiveStreamUI(streamId);
 }
-
 // Update UI elements for live stream
 function updateLiveStreamUI(streamId) {
     const config = STREAM_CONFIG[streamId];
@@ -1345,58 +483,26 @@ function toggleStream(playButton){
 }
 function playStream(){
     // #region agent log
-    debugLog('app.js:556', 'playStream() called', {paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState,src:stream.getElementsByTagName('source')[0]?.getAttribute('src'),sourceCount:stream.getElementsByTagName('source').length}, 'E');
+    console.log('playStream() called');
     // #endregion
-    
-    // Check if stream is in a bad state before attempting to play
-    if (currentStreamId && stream.networkState === 3) { // NETWORK_NO_SOURCE or error state
-        debugLog('app.js:556', 'Stream in error state, reloading before play', {
-            networkState: stream.networkState,
-            readyState: stream.readyState,
-            error: stream.error?.code
-        }, 'A');
-        performStreamReload();
-        return;
-    }
+
     
     if (scrubUpdater) {
         clearInterval(scrubUpdater);
     }
     addClass("bar-play-button", "playing");
-    
-    // #region agent log
     const playPromise = stream.play();
     playPromise.then(() => {
-        debugLog('app.js:567', 'playStream() - play() resolved', {paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState}, 'E');
-        // Hide loading indicator if readyState is good
-        if (stream.readyState >= 3) {
-            hideLoadingIndicator();
-        }
+        console.log('playStream() - play() resolved');
     }).catch((err) => {
-        debugLog('app.js:569', 'playStream() - play() rejected', {error:err.message,paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState}, 'E');
-        
-        // If play() is rejected and we're trying to play a live stream, reload it
-        if (currentStreamId && !stream.paused && (stream.networkState === 3 || stream.readyState < 2)) {
-            debugLog('app.js:569', 'play() rejected with bad network/ready state - reloading stream', {
-                networkState: stream.networkState,
-                readyState: stream.readyState,
-                error: err.message
-            }, 'A');
-            setTimeout(() => {
-                if (currentStreamId && !isLoading) {
-                    performStreamReload();
-                }
-            }, 1000);
-        }
+        console.log('playStream() - play() rejected');
     });
-    // #endregion
-    
     scrubUpdater = window.setInterval(updateScrubber, 1000);
 }
 
 function pauseStream(){
     // #region agent log
-    debugLog('app.js:578', 'pauseStream() called', {paused:stream.paused,readyState:stream.readyState,networkState:stream.networkState,src:stream.getElementsByTagName('source')[0]?.getAttribute('src'),sourceCount:stream.getElementsByTagName('source').length}, 'A');
+    console.log('pauseStream() called');
     // #endregion
     
     removeClass("bar-play-button", "playing");
@@ -1492,9 +598,6 @@ function playEpisode(audioUrl, title, time, programName, imageUrl){
         return;
     }
 
-    // Reset stream ID when playing episode
-    currentStreamId = null;
-    
     player.getElementsByTagName('source')[0].setAttribute('src', audioUrl);
     playerTitle.innerHTML = title;
     if (playerSubtitle) {
@@ -1525,7 +628,7 @@ function playEpisode(audioUrl, title, time, programName, imageUrl){
     updateMediaSessionForEpisode(title, programName, imageUrl);
     
     // #region agent log
-    debugLog('app.js:705', 'playEpisode() - calling load()', {audioUrl,sourceCount:player.getElementsByTagName('source').length}, 'C');
+    console.log('playEpisode() - calling load()');
     // #endregion
     
     stream.load();
@@ -1591,7 +694,6 @@ function updateScrubber(){
     let x = stream.currentTime / streamFullTime * (scrubberRect.width - scrubberHandleDiameter) + scrubberHandleDiameter
     scrubberActiveRange.style.width = x + "px"
     displayFormattedCurrentTime(stream.currentTime)
-    streamingAnalytics(stream.currentTime, streamFullTime)
     }
     // Update buffer debug display
     updateBufferDebug();
@@ -1679,7 +781,6 @@ window.addEventListener("mouseup", up);
 window.addEventListener("touchend", up);
 volumeContainer.addEventListener("touchstart", down);
 volumeContainer.addEventListener("mousedown", down);
-volumeContainer.addEventListener("mousedown", volumeSlide);
 volumeContainer.addEventListener("touchmove", volumeSlide);
 volumeContainer.addEventListener("mousemove", volumeSlide);
 window.addEventListener("mousemove", volumeSlide);
@@ -1694,6 +795,7 @@ function down(event) {
     if (typeof event.touches != "undefined") {
         disableScrolling();
     }
+    volumeSlide(event)
 }
 
 function up(event) {
@@ -1854,32 +956,4 @@ function removeClass(id, oldclass){
     if (element) {
         element.classList.remove(oldclass);
     }
-}
-
-function streamingAnalytics(currentTime, fullTime){
-  var percentage = 100*currentTime/fullTime
-
-  switch (true) {
-    case (percentage > 90 && analyticsTriggered < 90):
-      analyticsTriggered = 90
-      plausible('Streaming 90%', {props: {Episódio: streamTitle}})
-      break;
-      case (percentage > 75 && analyticsTriggered < 75):
-        analyticsTriggered = 75
-        plausible('Streaming 75%', {props: {Episódio: streamTitle}})
-        break;
-      case (percentage > 50 && analyticsTriggered < 50):
-        analyticsTriggered = 50
-        plausible('Streaming 50%', {props: {Episódio: streamTitle}})
-        break;
-      case (percentage > 25 && analyticsTriggered < 25):
-        analyticsTriggered = 25
-        plausible('Streaming 25%', {props: {Episódio: streamTitle}})
-        break;
-      case (percentage > 10 && analyticsTriggered < 10):
-        analyticsTriggered = 10
-        plausible('Streaming 10%', {props: {Episódio: streamTitle}})
-        break;
-    default:
-  }
 }
