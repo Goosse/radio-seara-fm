@@ -5,14 +5,70 @@ const registerServiceWorker = async () => {
         const thisScript = document.currentScript;
         let buildTag = thisScript.getAttribute('data-buildTag');
         await navigator.serviceWorker.register("/sw.js?build-tag=" + buildTag, {
-            scope: "/",
-        });
+        scope: "/",
+      });
     } catch (error) {
       console.error(`Service worker registration failed:`, error);
     }
   }
 };
 registerServiceWorker();
+
+//Mark: YouTube Autoplay Based on Connection Speed
+// COMMENTED OUT - Disabled to avoid interference with live audio streams
+// function shouldAutoplayYouTube() {
+//     // Check Network Information API
+//     if (navigator.connection) {
+//         const connection = navigator.connection;
+//         const effectiveType = connection.effectiveType; // '4g', '3g', '2g', 'slow-2g'
+//         const downlink = connection.downlink; // Bandwidth in Mbps
+//         
+//         // Autoplay if 4g connection or downlink > 1.5 Mbps
+//         if (effectiveType === '4g' || (downlink && downlink > 1.5)) {
+//             return true;
+//         }
+//     }
+//     // Default to no autoplay for slower connections
+//     return false;
+// }
+
+// function setupYouTubeAutoplay() {
+//     const shouldAutoplay = shouldAutoplayYouTube();
+//     
+//     // Update home page YouTube embed
+//     const homeEmbed = document.getElementById('home-youtube-embed');
+//     if (homeEmbed) {
+//         const currentSrc = homeEmbed.src;
+//         // Remove autoplay first to get clean URL
+//         let cleanSrc = currentSrc.replace(/[&?]autoplay=1/, '').replace(/autoplay=1[&?]/, '');
+//         
+//         if (shouldAutoplay) {
+//             // Add autoplay parameter
+//             const separator = cleanSrc.includes('?') ? '&' : '?';
+//             homeEmbed.src = cleanSrc + separator + 'autoplay=1';
+//         } else {
+//             // Ensure autoplay is removed
+//             homeEmbed.src = cleanSrc;
+//         }
+//     }
+//     
+//     // Update parceiros page YouTube embed
+//     const parceirosEmbed = document.getElementById('parceiros-youtube-embed');
+//     if (parceirosEmbed) {
+//         const currentSrc = parceirosEmbed.src;
+//         // Remove autoplay first to get clean URL
+//         let cleanSrc = currentSrc.replace(/[&?]autoplay=1/, '').replace(/autoplay=1[&?]/, '');
+//         
+//         if (shouldAutoplay) {
+//             // Add autoplay parameter
+//             const separator = cleanSrc.includes('?') ? '&' : '?';
+//             parceirosEmbed.src = cleanSrc + separator + 'autoplay=1';
+//         } else {
+//             // Ensure autoplay is removed
+//             parceirosEmbed.src = cleanSrc;
+//         }
+//     }
+// }
 
 //Mark: SPA Navigation (Persistent Player)
 function isInternalLink(url) {
@@ -88,19 +144,28 @@ updateBackButtonVisibility();
 
 const STREAM_CONFIG = {
     '102': {
-        url: 'https://radioseara.fm/stream102',
+        url: 'https://radioseara.fm/stream102', //'https://radioseara.fm/stream102'
         name: 'Nova Russas 102,7',
         coords: { lat: -4.707070, lon: -40.563689 }
     },
     '104': {
-        url: 'https://radioseara.fm/stream104',
+        url: 'https://radioseara.fm/stream104', //'https://radioseara.fm/stream104'
         name: 'Ibiapina 104,7',
         coords: { lat: -3.944082, lon: -40.849463 }
     }
 };
 
 const LIVE_STREAM_ARTWORK = 'https://radioseara.fm/recursos/capas/semmarca/ao-vivo.webp';
-let currentStreamId = null; // Track active stream ID ('102' or '104')
+// Loading indicator management (only for bar player)
+function showLoadingIndicator() {
+    const barButton = document.getElementById('bar-play-button');
+    if (barButton) barButton.classList.add('buffering');
+}
+
+function hideLoadingIndicator() {
+    const barButton = document.getElementById('bar-play-button');
+    if (barButton) barButton.classList.remove('buffering');
+}
 
 // Calculate distance between two coordinates using Haversine formula
 function calculateDistance(lat1, lon1, lat2, lon2) {
@@ -161,6 +226,7 @@ function initializePage(){
     updateLiveBanner();
     ensureLiveStreamSource();
     updateBackButtonVisibility();
+    // setupYouTubeAutoplay(); // COMMENTED OUT - Disabled to avoid interference with live audio streams
 }
 
 // Show/hide back button based on current URL
@@ -213,30 +279,6 @@ const defaultLiveProgram = {
     description: 'Acompanhe a transmissão ao vivo e fique por dentro da nossa programação.'
 };
 
-async function ensureLiveStreamSource(){
-    if (!stream) return;
-    const sourceEl = stream.getElementsByTagName('source')[0];
-    if (!sourceEl) return;
-    
-    const currentSrc = sourceEl.getAttribute('src');
-    
-    // Detect which stream is currently set (if any)
-    if (currentSrc) {
-        if (currentSrc.includes('stream102')) {
-            currentStreamId = '102';
-        } else if (currentSrc.includes('stream104')) {
-            currentStreamId = '104';
-        }
-    }
-    
-    // Only set default if no source is set and we're not already playing
-    if (!currentSrc && !currentStreamId) {
-        const defaultStreamId = await determineClosestStream();
-        currentStreamId = defaultStreamId;
-        sourceEl.setAttribute('src', STREAM_CONFIG[defaultStreamId].url);
-        stream.load();
-    }
-}
 
 function timeToMinutes(time){
     const [hours, minutes] = time.split(':').map(Number);
@@ -280,12 +322,30 @@ var streamFullTime = 0 //in seconds
 var streamTitle = '';
 var scrubUpdater
 stream.volume = 0.5;
+
+stream.addEventListener("loadstart", function() {
+    console.log('Audio loadstart event');
+    // Show loading indicator when starting to load
+    if (!stream.paused) {
+        showLoadingIndicator();
+    }
+});
+stream.addEventListener("canplay", function() {
+    console.log('Audio canplay event');
+    // Hide loading indicator when ready to play
+    hideLoadingIndicator();
+
+});
+stream.addEventListener("ended", function() {
+    console.log('stream ended');
+});
+
 stream.addEventListener("volumechange", function() {
     // Show volume slider only on non-iOS devices
     // iOS typically doesn't allow programmatic volume control
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
     if (!isIOS) {
-        removeClass("volume", "hidden");
+    removeClass("volume", "hidden");
     }
 });
 
@@ -325,86 +385,47 @@ if('mediaSession' in navigator) {
       }
   });
 }    
+async function playLiveStream(){
+    let streamId = await determineClosestStream();
+    switchStream(streamId);
+    showStreamToggle();
+    removeClass("bar-player-wrapper", "closed");
+    updateSliderVariables()
+    playStream();
+}
+
+async function switchStream(streamId){ //Caled ny the toggle buttons and the play live stream button.
     
-
-
-async function toggleLiveStream(playButton, streamId = null){
-    const buttonId = playButton && playButton.id ? playButton.id : 'live-stream-play-button';
-    if (!stream) return;
+    // #region agent log
+    console.log('switchStream() called');
+    // #endregion
+    
+    const wasPlaying = !stream.paused;
+    // Save preference to localStorage
+    localStorage.setItem('preferredStreamId', streamId);
 
     const sourceEl = stream.getElementsByTagName('source')[0];
     if (!sourceEl) return;
 
-    // Determine which stream to use
-    let targetStreamId = streamId;
-    if (!targetStreamId) {
-        if (currentStreamId) {
-            targetStreamId = currentStreamId;
-        } else {
-            targetStreamId = await determineClosestStream();
-        }
-    }
+    const targetStreamUrl = STREAM_CONFIG[streamId].url;
+  
+    sourceEl.setAttribute('src', targetStreamUrl);
+    streamFullTime = 0;
+    streamTitle = 'Rádio Seara Ao Vivo';
+    
+    console.log('Calling stream.load()');
+    stream.load();
 
-    const currentSrc = sourceEl.getAttribute('src');
-    const targetStreamUrl = STREAM_CONFIG[targetStreamId].url;
-    const switchingToLive = !currentSrc || (!currentSrc.includes('stream102') && !currentSrc.includes('stream104'));
-    const switchingStream = currentSrc !== targetStreamUrl;
-    // Reload if switching streams, or if currentStreamId doesn't match (including when it's null)
-    const needsReload = switchingToLive || switchingStream || !currentStreamId || currentStreamId !== targetStreamId;
-
-    if (needsReload) {
-        // Pause if currently playing
-        const wasPlaying = !stream.paused;
-        if (wasPlaying) {
-            stream.pause();
-        }
-        
-        sourceEl.setAttribute('src', targetStreamUrl);
-        currentStreamId = targetStreamId;
-        streamFullTime = 0;
-        streamTitle = 'Rádio Seara Ao Vivo';
-        stream.load();
-        
-        // Resume if was playing
-        if (wasPlaying) {
-            stream.play().catch(() => {});
-        }
-    }
-
-    // Always update UI when playing live stream (even if source was already set)
-    if (!currentStreamId || currentStreamId !== targetStreamId) {
-        currentStreamId = targetStreamId;
-    }
-    updateLiveStreamUI(targetStreamId);
-
-    const shouldPlay = stream.paused || needsReload;
-
-    if (shouldPlay) {
-        removeClass("bar-player-wrapper", "closed");
-        showStreamToggle();
-        analyticsTriggered = 0;
+    // Resume if was playing
+    if (wasPlaying) {
+        console.log('switchStream() - stream was playing');
         playStream();
-    } else {
-        pauseStream();
     }
-}
-
-// Switch between streams (called from toggle buttons)
-function switchStream(streamId) {
-    if (currentStreamId === streamId) return;
-    
-    // Save preference to localStorage
-    localStorage.setItem('preferredStreamId', streamId);
-    
-    const wasPlaying = !stream.paused;
-    toggleLiveStream(null, streamId);
-    
-    // If was playing, ensure it continues playing
-    if (wasPlaying && stream.paused) {
-        stream.play().catch(() => {});
+    else{
+        console.log('switchStream() - stream was not playing');
     }
+    updateLiveStreamUI(streamId);
 }
-
 // Update UI elements for live stream
 function updateLiveStreamUI(streamId) {
     const config = STREAM_CONFIG[streamId];
@@ -453,24 +474,42 @@ function updateLiveStreamUI(streamId) {
 function toggleStream(playButton){
     if (stream.paused){
         playStream()
+        showLoadingIndicator();
     }
     else{
         pauseStream()
     }
 }
 function playStream(){
+    // #region agent log
+    console.log('playStream() called');
+    // #endregion
+
+    
     if (scrubUpdater) {
         clearInterval(scrubUpdater);
     }
     addClass("bar-play-button", "playing");
-    stream.play().catch(() => {});
+    const playPromise = stream.play();
+    playPromise.then(() => {
+        console.log('playStream() - play() resolved');
+        hideLoadingIndicator();
+    }).catch((err) => {
+        console.log('playStream() - play() rejected');
+    });
     scrubUpdater = window.setInterval(updateScrubber, 1000);
 }
 
 function pauseStream(){
+    // #region agent log
+    console.log('pauseStream() called');
+    // #endregion
+    
     removeClass("bar-play-button", "playing");
     stream.pause();
-    clearInterval(scrubUpdater)
+    clearInterval(scrubUpdater);
+    // Hide loading indicator when paused
+    hideLoadingIndicator();
 }
 
 // Helper function to update Media Session metadata for episodes
@@ -495,11 +534,6 @@ function updateMediaSessionForEpisode(title, programName, artworkUrl) {
             ]
         });
     }
-}
-
-function playEpisodeWithImage(audioUrl, title, time, programName, imageUrl){
-    document.getElementById("bar-player-artwork").setAttribute('src', imageUrl)
-    playEpisode(audioUrl, title, time, programName, imageUrl)
 }
 
 function showStreamToggle() {
@@ -559,9 +593,6 @@ function playEpisode(audioUrl, title, time, programName, imageUrl){
         return;
     }
 
-    // Reset stream ID when playing episode
-    currentStreamId = null;
-    
     player.getElementsByTagName('source')[0].setAttribute('src', audioUrl);
     playerTitle.innerHTML = title;
     if (playerSubtitle) {
@@ -574,7 +605,6 @@ function playEpisode(audioUrl, title, time, programName, imageUrl){
     totalTime.innerHTML = formattedTime
     streamFullTime = time
     streamTitle = title;
-    analyticsTriggered = 0;
     updateSliderVariables();  //The episode title can change the scrubber slider's length.
 
     if (artwork) {
@@ -590,6 +620,10 @@ function playEpisode(audioUrl, title, time, programName, imageUrl){
     
     // Update Media Session metadata for lock screen
     updateMediaSessionForEpisode(title, programName, imageUrl);
+    
+    // #region agent log
+    console.log('playEpisode() - calling load()');
+    // #endregion
     
     stream.load();
     playStream()
@@ -639,7 +673,6 @@ var scrubberActiveRange;
 var scrubberContainer;
 var scrubberHandleDiameter;
 var scrubberRect;
-var analyticsTriggered = 0;
 
 if (document.getElementById("scrubber-slider")){
     scrubberActiveRange = document.getElementById("scrubber-active-range");
@@ -651,11 +684,26 @@ if (document.getElementById("scrubber-slider")){
 function updateScrubber(){
     // Only update scrubber if playing an episode (live stream has no scrubber)
     if (streamFullTime > 0 && scrubberRect) {
-        let x = stream.currentTime / streamFullTime * (scrubberRect.width - scrubberHandleDiameter) + scrubberHandleDiameter
-        scrubberActiveRange.style.width = x + "px"
-        displayFormattedCurrentTime(stream.currentTime)
-        streamingAnalytics(stream.currentTime, streamFullTime)
+    let x = stream.currentTime / streamFullTime * (scrubberRect.width - scrubberHandleDiameter) + scrubberHandleDiameter
+    scrubberActiveRange.style.width = x + "px"
+    displayFormattedCurrentTime(stream.currentTime)
     }
+    // Update buffer debug display
+    updateBufferDebug();
+}
+
+function updateBufferDebug() {
+    const bufferDebugEl = document.getElementById('buffer-debug');
+    if (!bufferDebugEl) return;
+    
+    let bufferAhead = 0;
+    if (stream.buffered && stream.buffered.length > 0) {
+        const bufferedEnd = stream.buffered.end(stream.buffered.length - 1);
+        bufferAhead = bufferedEnd - (stream.currentTime || 0);
+    }
+    
+    // Format to 1 decimal place
+    bufferDebugEl.textContent = bufferAhead.toFixed(1) + 's';
 }
 
 function displayFormattedCurrentTime(seconds){
@@ -726,7 +774,6 @@ window.addEventListener("mouseup", up);
 window.addEventListener("touchend", up);
 volumeContainer.addEventListener("touchstart", down);
 volumeContainer.addEventListener("mousedown", down);
-volumeContainer.addEventListener("mousedown", volumeSlide);
 volumeContainer.addEventListener("touchmove", volumeSlide);
 volumeContainer.addEventListener("mousemove", volumeSlide);
 window.addEventListener("mousemove", volumeSlide);
@@ -741,6 +788,7 @@ function down(event) {
     if (typeof event.touches != "undefined") {
         disableScrolling();
     }
+    volumeSlide(event)
 }
 
 function up(event) {
@@ -901,32 +949,4 @@ function removeClass(id, oldclass){
     if (element) {
         element.classList.remove(oldclass);
     }
-}
-
-function streamingAnalytics(currentTime, fullTime){
-  var percentage = 100*currentTime/fullTime
-
-  switch (true) {
-    case (percentage > 90 && analyticsTriggered < 90):
-      analyticsTriggered = 90
-      plausible('Streaming 90%', {props: {Episódio: streamTitle}})
-      break;
-      case (percentage > 75 && analyticsTriggered < 75):
-        analyticsTriggered = 75
-        plausible('Streaming 75%', {props: {Episódio: streamTitle}})
-        break;
-      case (percentage > 50 && analyticsTriggered < 50):
-        analyticsTriggered = 50
-        plausible('Streaming 50%', {props: {Episódio: streamTitle}})
-        break;
-      case (percentage > 25 && analyticsTriggered < 25):
-        analyticsTriggered = 25
-        plausible('Streaming 25%', {props: {Episódio: streamTitle}})
-        break;
-      case (percentage > 10 && analyticsTriggered < 10):
-        analyticsTriggered = 10
-        plausible('Streaming 10%', {props: {Episódio: streamTitle}})
-        break;
-    default:
-  }
 }
