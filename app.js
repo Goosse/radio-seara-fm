@@ -15,59 +15,60 @@ const registerServiceWorker = async () => {
 registerServiceWorker();
 
 //Mark: YouTube Autoplay Based on Connection Speed
-function shouldAutoplayYouTube() {
-    // Check Network Information API
-    if (navigator.connection) {
-        const connection = navigator.connection;
-        const effectiveType = connection.effectiveType; // '4g', '3g', '2g', 'slow-2g'
-        const downlink = connection.downlink; // Bandwidth in Mbps
-        
-        // Autoplay if 4g connection or downlink > 1.5 Mbps
-        if (effectiveType === '4g' || (downlink && downlink > 1.5)) {
-            return true;
-        }
-    }
-    // Default to no autoplay for slower connections
-    return false;
-}
+// COMMENTED OUT - Disabled to avoid interference with live audio streams
+// function shouldAutoplayYouTube() {
+//     // Check Network Information API
+//     if (navigator.connection) {
+//         const connection = navigator.connection;
+//         const effectiveType = connection.effectiveType; // '4g', '3g', '2g', 'slow-2g'
+//         const downlink = connection.downlink; // Bandwidth in Mbps
+//         
+//         // Autoplay if 4g connection or downlink > 1.5 Mbps
+//         if (effectiveType === '4g' || (downlink && downlink > 1.5)) {
+//             return true;
+//         }
+//     }
+//     // Default to no autoplay for slower connections
+//     return false;
+// }
 
-function setupYouTubeAutoplay() {
-    const shouldAutoplay = shouldAutoplayYouTube();
-    
-    // Update home page YouTube embed
-    const homeEmbed = document.getElementById('home-youtube-embed');
-    if (homeEmbed) {
-        const currentSrc = homeEmbed.src;
-        // Remove autoplay first to get clean URL
-        let cleanSrc = currentSrc.replace(/[&?]autoplay=1/, '').replace(/autoplay=1[&?]/, '');
-        
-        if (shouldAutoplay) {
-            // Add autoplay parameter
-            const separator = cleanSrc.includes('?') ? '&' : '?';
-            homeEmbed.src = cleanSrc + separator + 'autoplay=1';
-        } else {
-            // Ensure autoplay is removed
-            homeEmbed.src = cleanSrc;
-        }
-    }
-    
-    // Update parceiros page YouTube embed
-    const parceirosEmbed = document.getElementById('parceiros-youtube-embed');
-    if (parceirosEmbed) {
-        const currentSrc = parceirosEmbed.src;
-        // Remove autoplay first to get clean URL
-        let cleanSrc = currentSrc.replace(/[&?]autoplay=1/, '').replace(/autoplay=1[&?]/, '');
-        
-        if (shouldAutoplay) {
-            // Add autoplay parameter
-            const separator = cleanSrc.includes('?') ? '&' : '?';
-            parceirosEmbed.src = cleanSrc + separator + 'autoplay=1';
-        } else {
-            // Ensure autoplay is removed
-            parceirosEmbed.src = cleanSrc;
-        }
-    }
-}
+// function setupYouTubeAutoplay() {
+//     const shouldAutoplay = shouldAutoplayYouTube();
+//     
+//     // Update home page YouTube embed
+//     const homeEmbed = document.getElementById('home-youtube-embed');
+//     if (homeEmbed) {
+//         const currentSrc = homeEmbed.src;
+//         // Remove autoplay first to get clean URL
+//         let cleanSrc = currentSrc.replace(/[&?]autoplay=1/, '').replace(/autoplay=1[&?]/, '');
+//         
+//         if (shouldAutoplay) {
+//             // Add autoplay parameter
+//             const separator = cleanSrc.includes('?') ? '&' : '?';
+//             homeEmbed.src = cleanSrc + separator + 'autoplay=1';
+//         } else {
+//             // Ensure autoplay is removed
+//             homeEmbed.src = cleanSrc;
+//         }
+//     }
+//     
+//     // Update parceiros page YouTube embed
+//     const parceirosEmbed = document.getElementById('parceiros-youtube-embed');
+//     if (parceirosEmbed) {
+//         const currentSrc = parceirosEmbed.src;
+//         // Remove autoplay first to get clean URL
+//         let cleanSrc = currentSrc.replace(/[&?]autoplay=1/, '').replace(/autoplay=1[&?]/, '');
+//         
+//         if (shouldAutoplay) {
+//             // Add autoplay parameter
+//             const separator = cleanSrc.includes('?') ? '&' : '?';
+//             parceirosEmbed.src = cleanSrc + separator + 'autoplay=1';
+//         } else {
+//             // Ensure autoplay is removed
+//             parceirosEmbed.src = cleanSrc;
+//         }
+//     }
+// }
 
 //Mark: SPA Navigation (Persistent Player)
 function isInternalLink(url) {
@@ -143,20 +144,18 @@ updateBackButtonVisibility();
 
 const STREAM_CONFIG = {
     '102': {
-        url: 'https://audio-edge-es6pf.mia.g.radiomast.io/ref-64k-heaacv2-stereo', //'https://radioseara.fm/stream102'
-        name: 'HTTP Stream (Icecast)',
+        url: 'https://stream.radioseara.fm/hls/stream102/master.m3u8', //'https://radioseara.fm/stream102'
+        name: 'Nova Russas 102,7',
         coords: { lat: -4.707070, lon: -40.563689 }
     },
     '104': {
-        url: 'https://audio-edge-es6pf.mia.g.radiomast.io/ref-64k-heaacv2-stereo/hls.m3u8', //'https://radioseara.fm/stream104'
-        name: 'HLS Stream',
+        url: 'https://stream.radioseara.fm/hls/stream104/master.m3u8', //'https://radioseara.fm/stream104'
+        name: 'Ibiapina 104,7',
         coords: { lat: -3.944082, lon: -40.849463 }
     }
 };
 
 const LIVE_STREAM_ARTWORK = 'https://radioseara.fm/recursos/capas/semmarca/ao-vivo.webp';
-let isLoading = false; // Prevent multiple simultaneous load() calls
-
 // Loading indicator management (only for bar player)
 function showLoadingIndicator() {
     const barButton = document.getElementById('bar-play-button');
@@ -227,7 +226,7 @@ function initializePage(){
     updateLiveBanner();
     ensureLiveStreamSource();
     updateBackButtonVisibility();
-    setupYouTubeAutoplay();
+    // setupYouTubeAutoplay(); // COMMENTED OUT - Disabled to avoid interference with live audio streams
 }
 
 // Show/hide back button based on current URL
@@ -322,6 +321,7 @@ var stream = document.getElementById("player");
 var streamFullTime = 0 //in seconds
 var streamTitle = '';
 var scrubUpdater
+var playbackStartTime = null; // Track when playback started for timer
 stream.volume = 0.5;
 
 stream.addEventListener("loadstart", function() {
@@ -332,8 +332,7 @@ stream.addEventListener("loadstart", function() {
     }
 });
 stream.addEventListener("canplay", function() {
-    isLoading = false; // Reset loading flag when stream can play
-    console.log('Audio canplay event - reset isLoading');
+    console.log('Audio canplay event');
     // Hide loading indicator when ready to play
     hideLoadingIndicator();
 
@@ -396,7 +395,7 @@ async function playLiveStream(){
     playStream();
 }
 
-async function switchStream(streamId){
+async function switchStream(streamId){ //Caled ny the toggle buttons and the play live stream button.
     
     // #region agent log
     console.log('switchStream() called');
@@ -417,6 +416,10 @@ async function switchStream(streamId){
     
     console.log('Calling stream.load()');
     stream.load();
+
+    // Reset playback timer when switching streams
+    playbackStartTime = null;
+    updatePlaybackTimer();
 
     // Resume if was playing
     if (wasPlaying) {
@@ -476,6 +479,7 @@ function updateLiveStreamUI(streamId) {
 function toggleStream(playButton){
     if (stream.paused){
         playStream()
+        showLoadingIndicator();
     }
     else{
         pauseStream()
@@ -491,9 +495,14 @@ function playStream(){
         clearInterval(scrubUpdater);
     }
     addClass("bar-play-button", "playing");
+    
+    // Start playback timer
+    playbackStartTime = Date.now();
+    
     const playPromise = stream.play();
     playPromise.then(() => {
         console.log('playStream() - play() resolved');
+        hideLoadingIndicator();
     }).catch((err) => {
         console.log('playStream() - play() rejected');
     });
@@ -510,6 +519,10 @@ function pauseStream(){
     clearInterval(scrubUpdater);
     // Hide loading indicator when paused
     hideLoadingIndicator();
+    
+    // Reset playback timer
+    playbackStartTime = null;
+    updatePlaybackTimer();
 }
 
 // Helper function to update Media Session metadata for episodes
@@ -534,11 +547,6 @@ function updateMediaSessionForEpisode(title, programName, artworkUrl) {
             ]
         });
     }
-}
-
-function playEpisodeWithImage(audioUrl, title, time, programName, imageUrl){
-    document.getElementById("bar-player-artwork").setAttribute('src', imageUrl)
-    playEpisode(audioUrl, title, time, programName, imageUrl)
 }
 
 function showStreamToggle() {
@@ -610,7 +618,6 @@ function playEpisode(audioUrl, title, time, programName, imageUrl){
     totalTime.innerHTML = formattedTime
     streamFullTime = time
     streamTitle = title;
-    analyticsTriggered = 0;
     updateSliderVariables();  //The episode title can change the scrubber slider's length.
 
     if (artwork) {
@@ -679,7 +686,6 @@ var scrubberActiveRange;
 var scrubberContainer;
 var scrubberHandleDiameter;
 var scrubberRect;
-var analyticsTriggered = 0;
 
 if (document.getElementById("scrubber-slider")){
     scrubberActiveRange = document.getElementById("scrubber-active-range");
@@ -711,6 +717,33 @@ function updateBufferDebug() {
     
     // Format to 1 decimal place
     bufferDebugEl.textContent = bufferAhead.toFixed(1) + 's';
+    
+    // Update playback timer
+    updatePlaybackTimer();
+}
+
+function updatePlaybackTimer() {
+    const timerEl = document.getElementById('playback-timer');
+    if (!timerEl) return;
+    
+    // Only show timer when stream is playing
+    if (stream.paused || !playbackStartTime) {
+        timerEl.textContent = '0:00';
+        return;
+    }
+    
+    // Calculate elapsed time since playback started
+    const elapsedSeconds = Math.floor((Date.now() - playbackStartTime) / 1000);
+    const hours = Math.floor(elapsedSeconds / 3600);
+    const minutes = Math.floor((elapsedSeconds % 3600) / 60);
+    const seconds = elapsedSeconds % 60;
+    
+    // Format as H:MM:SS when hours > 0, otherwise M:SS
+    if (hours > 0) {
+        timerEl.textContent = `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    } else {
+        timerEl.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    }
 }
 
 function displayFormattedCurrentTime(seconds){
