@@ -224,7 +224,6 @@ async function determineClosestStream() {
 
 function initializePage(){
     updateLiveBanner();
-    ensureLiveStreamSource();
     updateBackButtonVisibility();
     // setupYouTubeAutoplay(); // COMMENTED OUT - Disabled to avoid interference with live audio streams
 }
@@ -324,20 +323,12 @@ var scrubUpdater
 stream.volume = 0.5;
 
 stream.addEventListener("loadstart", function() {
-    console.log('Audio loadstart event');
-    // Show loading indicator when starting to load
     if (!stream.paused) {
         showLoadingIndicator();
     }
 });
 stream.addEventListener("canplay", function() {
-    console.log('Audio canplay event');
-    // Hide loading indicator when ready to play
     hideLoadingIndicator();
-
-});
-stream.addEventListener("ended", function() {
-    console.log('stream ended');
 });
 
 stream.addEventListener("volumechange", function() {
@@ -395,11 +386,6 @@ async function playLiveStream(){
 }
 
 async function switchStream(streamId){ //Caled ny the toggle buttons and the play live stream button.
-    
-    // #region agent log
-    console.log('switchStream() called');
-    // #endregion
-    
     const wasPlaying = !stream.paused;
     // Save preference to localStorage
     localStorage.setItem('preferredStreamId', streamId);
@@ -413,16 +399,10 @@ async function switchStream(streamId){ //Caled ny the toggle buttons and the pla
     streamFullTime = 0;
     streamTitle = 'Rádio Seara Ao Vivo';
     
-    console.log('Calling stream.load()');
     stream.load();
 
-    // Resume if was playing
     if (wasPlaying) {
-        console.log('switchStream() - stream was playing');
         playStream();
-    }
-    else{
-        console.log('switchStream() - stream was not playing');
     }
     updateLiveStreamUI(streamId);
 }
@@ -481,30 +461,17 @@ function toggleStream(playButton){
     }
 }
 function playStream(){
-    // #region agent log
-    console.log('playStream() called');
-    // #endregion
-
-    
     if (scrubUpdater) {
         clearInterval(scrubUpdater);
     }
     addClass("bar-play-button", "playing");
-    const playPromise = stream.play();
-    playPromise.then(() => {
-        console.log('playStream() - play() resolved');
+    stream.play().then(() => {
         hideLoadingIndicator();
-    }).catch((err) => {
-        console.log('playStream() - play() rejected');
-    });
+    }).catch(() => {});
     scrubUpdater = window.setInterval(updateScrubber, 1000);
 }
 
 function pauseStream(){
-    // #region agent log
-    console.log('pauseStream() called');
-    // #endregion
-    
     removeClass("bar-play-button", "playing");
     stream.pause();
     clearInterval(scrubUpdater);
@@ -621,10 +588,6 @@ function playEpisode(audioUrl, title, time, programName, imageUrl){
     // Update Media Session metadata for lock screen
     updateMediaSessionForEpisode(title, programName, imageUrl);
     
-    // #region agent log
-    console.log('playEpisode() - calling load()');
-    // #endregion
-    
     stream.load();
     playStream()
 }
@@ -688,22 +651,6 @@ function updateScrubber(){
     scrubberActiveRange.style.width = x + "px"
     displayFormattedCurrentTime(stream.currentTime)
     }
-    // Update buffer debug display
-    updateBufferDebug();
-}
-
-function updateBufferDebug() {
-    const bufferDebugEl = document.getElementById('buffer-debug');
-    if (!bufferDebugEl) return;
-    
-    let bufferAhead = 0;
-    if (stream.buffered && stream.buffered.length > 0) {
-        const bufferedEnd = stream.buffered.end(stream.buffered.length - 1);
-        bufferAhead = bufferedEnd - (stream.currentTime || 0);
-    }
-    
-    // Format to 1 decimal place
-    bufferDebugEl.textContent = bufferAhead.toFixed(1) + 's';
 }
 
 function displayFormattedCurrentTime(seconds){
