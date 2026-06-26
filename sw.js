@@ -1,7 +1,7 @@
 //Somehow I need to get a build tag built into thise serviceworker file, because caches will only be updated if this file changes.
 
-const buildTag = "202662520250";
-const precachedResources = ["/", "/algemas-quebradas/", "/recursos/capas/semmarca/algemas-quebradas.webp", "/culto-ice-nova-russas/", "/recursos/capas/semmarca/culto-ice-nova-russas.webp", "/familia-bencao-de-deus/", "/recursos/capas/semmarca/familia-bencao-de-deus.webp", "/jornal-seara/", "/recursos/capas/semmarca/jornal-seara.webp", "/ligado-na-verdade/", "/recursos/capas/semmarca/ligado-na-verdade.webp", "/minha-historia/", "/recursos/capas/semmarca/minha-historia.webp", "/seara-esporte-clube/", "/recursos/capas/semmarca/seara-esporte-clube.webp", "/parceiros/", "/a-esposa-por-tras/", "/baixar-minha-historia/", "/baixar-algemas-quebradas/", "/styles.css"];
+const buildTag = "2026626172230";
+const precachedResources = ["/", "/algemas-quebradas/", "/recursos/capas/semmarca/algemas-quebradas.webp", "/culto-ice-nova-russas/", "/recursos/capas/semmarca/culto-ice-nova-russas.webp", "/familia-bencao-de-deus/", "/recursos/capas/semmarca/familia-bencao-de-deus.webp", "/jornal-seara/", "/recursos/capas/semmarca/jornal-seara.webp", "/ligado-na-verdade/", "/recursos/capas/semmarca/ligado-na-verdade.webp", "/minha-historia/", "/recursos/capas/semmarca/minha-historia.webp", "/seara-esporte-clube/", "/recursos/capas/semmarca/seara-esporte-clube.webp", "/baixar-algemas-quebradas/", "/baixar-minha-historia/", "/a-esposa-por-tras/", "/parceiros/", "/styles.css"];
 const origin = new URL(location).origin;
 
 // Live streams should never be cached - they're real-time and constantly changing
