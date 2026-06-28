@@ -244,38 +244,66 @@ function updateBackButtonVisibility() {
 
 const liveProgrammingSchedule = [
     {
-        title: 'Razão Para Viver',
-        description: 'Compromisso com a excelência na comunicação da verdade bíblica e sua prática.',
-        days: [1, 2, 3, 4, 5], // Monday - Friday
-        start: '07:00',
+        title: 'Razão para Viver',
+        description: 'Antes de enfrentar os desafios do dia alimente a sua fé. O Pr. Fernando Bochio leva a verdade bíblica com excelência e prática.',
+        days: [1, 2, 3, 4, 5], // Seg.–Sex.
+        start: '06:00',
+        end: '06:30'
+    },
+    {
+        title: 'Céu Azul',
+        description: 'Moda boa, forró e sertanejo gospel com o João Lucas Barroso.',
+        days: [1, 2, 3, 4, 5],
+        start: '06:30',
         end: '08:00'
     },
     {
-        title: 'Jornal Seara',
-        description: 'As principais notícias da região com conteúdo cristão e compromisso com a verdade.',
-        days: [1, 2, 3, 4, 5],
-        start: '12:00',
-        end: '14:00'
+        title: 'Uma Vida a Dois',
+        description: 'Casamento é uma construção diária. Viva uma jornada de renovação e transformação no seu casamento. Uma pausa especial para ouvir princípios que abençoam uma vida a dois. Da editora Pão Diário.',
+        days: [0, 1, 2, 3, 4, 5, 6],
+        start: '14:00',
+        end: '14:30'
     },
     {
-        title: 'Tarde Musical',
-        description: 'Louvores que edificam e momentos de reflexão para a sua tarde.',
+        title: 'Amor Maior',
+        description: 'Com o Luís Augusto. Louvores que acalmam a alma. Mensagens que fortalecem a fé.',
         days: [1, 2, 3, 4, 5],
-        start: '14:00',
+        start: '15:00',
         end: '17:00'
     },
     {
-        title: 'Programação Ao Vivo',
-        description: 'Louvores, mensagens e participação dos ouvintes com a equipe Rádio Seara.',
-        days: [0, 6], // Weekend
-        start: '06:00',
-        end: '21:00'
+        title: 'Véin de 70 - Forró do Lima',
+        description: 'Fim de tarde com muito forró e alegria. Fala véin! O véi chegou!',
+        days: [1, 2, 3, 4, 5],
+        start: '17:00',
+        end: '19:00'
+    },
+    {
+        title: 'Voz do Brasil',
+        description: 'O programa oficial de informações do governo federal. Fique ligado para saber as principais ações, serviços e notícias que impactam o nosso país.',
+        days: [1, 2, 3, 4, 5],
+        start: '21:00',
+        end: '22:00'
+    },
+    {
+        title: 'Uma Vida a Dois',
+        description: 'Casamento é uma construção diária. Viva uma jornada de renovação e transformação no seu casamento. Uma pausa especial para ouvir princípios que abençoam uma vida a dois. Da editora Pão Diário.',
+        days: [0, 1, 2, 3, 4, 5, 6],
+        start: '23:30',
+        end: '00:00'
+    },
+    {
+        title: 'Especial Seara',
+        description: '',
+        days: [0], // Domingo
+        start: '12:00',
+        end: '13:00'
     }
 ];
 
 const defaultLiveProgram = {
-    title: 'Rádio Seara Ao Vivo',
-    description: 'Acompanhe a transmissão ao vivo e fique por dentro da nossa programação.'
+    title: 'Programação Ao Vivo',
+    description: 'Louvores, mensagens e participação dos ouvintes com a equipe Rádio Seara.'
 };
 
 
