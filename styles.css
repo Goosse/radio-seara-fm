@@ -244,7 +244,12 @@ p.programa-no-ar {
   }
   .banner.green {
     display: grid;
-    grid-template-columns: 5fr 1fr 1fr;
+    grid-template-columns: 1fr 3fr 2fr;
+  }
+  .banner.whatsapp {
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    padding: 8px 16px;
   }
   .banner.orange {
     display: grid;
@@ -257,18 +262,37 @@ p.programa-no-ar {
   }
 
   .description {
-    text-align: center;
     margin-right: 20px;
   }
 
   .banner-artwork {
     width: 150px;
     margin: 20px 0 0 10px;
-    order: 1;
     align-self: center;
   }
   .banner-artwork.ba-ao-vivo {
     margin-bottom: 0;
+  }
+}
+@media only screen and (min-width: 1024px) {
+  .banner.orange {
+    grid-template-columns: auto 1fr;
+    align-items: center;
+  }
+  .banner.orange .info,
+.banner.orange .description {
+    text-align: left;
+  }
+  .banner.orange .banner-buttons {
+    gap: 12px;
+  }
+  .banner.orange .banner-buttons .compartilhar,
+.banner.orange .banner-buttons .call-to-action {
+    margin: 0;
+  }
+  .banner.orange .banner-artwork {
+    width: 150px;
+    max-width: 150px;
   }
 }
 .flex {
@@ -795,7 +819,7 @@ iframe {
   }
 
   .episodios article {
-    grid-template-columns: 50px 1fr 136px;
+    grid-template-columns: 50px 1fr 150px;
     padding: 10px 30px;
     grid-gap: 30px;
   }
@@ -1068,6 +1092,19 @@ iframe {
     display: flex;
   }
 }
+@media only screen and (min-width: 1024px) {
+  #bar-player-wrapper {
+    left: 50%;
+    right: auto;
+    width: 100%;
+    max-width: 1100px;
+    transform: translateX(-50%);
+  }
+
+  #bar-player-wrapper.closed {
+    transform: translateX(-50%) translateY(100%);
+  }
+}
 .modal {
   position: fixed;
   top: 0;
@@ -1249,6 +1286,17 @@ a {
 
 ul {
   padding: 0;
+}
+
+@media only screen and (min-width: 1024px) {
+  header,
+main,
+footer {
+    max-width: 1100px;
+    margin-left: auto;
+    margin-right: auto;
+    width: 100%;
+  }
 }
 
 /*# sourceMappingURL=styles.css.map */

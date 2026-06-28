@@ -302,7 +302,7 @@ const liveProgrammingSchedule = [
 ];
 
 const defaultLiveProgram = {
-    title: 'Programação Ao Vivo',
+    title: 'Ao Vivo',
     description: 'Louvores, mensagens e participação dos ouvintes com a equipe Rádio Seara.'
 };
 
@@ -898,18 +898,38 @@ function closeDialog(button){
 }
 
 function disableScrolling(){
-    document.body.style.top = -window.scrollY + 'px';
-    document.body.top = -window.scrollY;
-    document.body.style.position = 'fixed';
+    const scrollY = window.scrollY;
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
 
+    document.body.dataset.scrollY = scrollY;
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.position = 'fixed';
+    document.body.style.width = '100%';
+
+    if (scrollbarWidth > 0) {
+        document.body.style.left = `-${scrollbarWidth/2}px`;
+        const barPlayer = document.getElementById('bar-player-wrapper');
+        if (barPlayer) {
+            barPlayer.style.paddingRight = `${scrollbarWidth}px`;
+        }
+    }
 }
 
 function enableScrolling(){
-    //const scrollY = document.body.style.top;
+    const scrollY = parseInt(document.body.dataset.scrollY || '0', 10);
+
     document.body.style.position = '';
     document.body.style.top = '';
-    window.scrollTo(0, -document.body.top);
-    document.body.top = '';
+    document.body.style.width = '';
+    document.body.style.paddingRight = '';
+    delete document.body.dataset.scrollY;
+
+    const barPlayer = document.getElementById('bar-player-wrapper');
+    if (barPlayer) {
+        barPlayer.style.paddingRight = '';
+    }
+
+    window.scrollTo(0, scrollY);
 }
 
 function addClass(id, newclass){
