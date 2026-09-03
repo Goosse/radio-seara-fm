@@ -1,6 +1,6 @@
 //Somehow I need to get a build tag built into thise serviceworker file, because caches will only be updated if this file changes.
 
-const buildTag = "202693172834";
+const buildTag = "20269317363";
 const precachedResources = ["/", "/algemas-quebradas/", "/recursos/capas/semmarca/algemas-quebradas.webp", "/culto-ice-nova-russas/", "/recursos/capas/semmarca/culto-ice-nova-russas.webp", "/familia-bencao-de-deus/", "/recursos/capas/semmarca/familia-bencao-de-deus.webp", "/jornal-seara/", "/recursos/capas/semmarca/jornal-seara.webp", "/ligado-na-verdade/", "/recursos/capas/semmarca/ligado-na-verdade.webp", "/minha-historia/", "/recursos/capas/semmarca/minha-historia.webp", "/seara-esporte-clube/", "/recursos/capas/semmarca/seara-esporte-clube.webp", "/baixar-minha-historia/", "/parceiros/", "/a-esposa-por-tras/", "/baixar-algemas-quebradas/", "/styles.css"];
 const origin = new URL(location).origin;
 
