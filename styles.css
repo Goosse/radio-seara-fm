@@ -182,7 +182,7 @@ ul {
 }
 .banner .description {
   font-family: Montserrat;
-  font-size: 12px;
+  font-size: 13px;
 }
 .banner .tag {
   display: inline-block;
@@ -274,6 +274,9 @@ p.programa-no-ar {
   }
 }
 @media only screen and (min-width: 1024px) {
+  .banner .description {
+    font-size: 15px;
+  }
   .banner.orange {
     grid-template-columns: auto 1fr;
     align-items: center;
@@ -830,7 +833,6 @@ iframe {
   align-self: center;
 }
 .banner.green.live .description {
-  font-size: 13px;
   margin: 6px 0 0 0;
 }
 
@@ -1063,7 +1065,6 @@ iframe {
     font-size: 1.8em;
   }
   .banner.green.live .description {
-    font-size: 15px;
     margin-top: 10px;
   }
   .banner.green.live .on-air-badge {
