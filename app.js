@@ -318,18 +318,19 @@ function findUpcomingPrograms(programs, time, count){
     return upcoming.sort((a, b) => a.minutesUntil - b.minutesUntil).slice(0, count);
 }
 
-function dayLabel(dayOffset, time){
-    if(dayOffset === 0){
+function dayLabel(entry, time){
+    // A program starting at midnight tonight reads better as "às 00:00" than "amanhã às 00:00".
+    if(entry.dayOffset === 0 || (entry.dayOffset === 1 && entry.program.start === '00:00')){
         return '';
     }
-    if(dayOffset === 1){
+    if(entry.dayOffset === 1){
         return 'amanhã';
     }
-    return WEEKDAY_NAMES[(time.day + dayOffset) % 7];
+    return WEEKDAY_NAMES[(time.day + entry.dayOffset) % 7];
 }
 
 function describeNextProgram(next, time){
-    const day = dayLabel(next.dayOffset, time);
+    const day = dayLabel(next, time);
     return next.program.title + ' ' + (day ? day + ' ' : '') + 'às ' + next.program.start;
 }
 
@@ -338,7 +339,7 @@ function renderUpcomingList(listEl, upcoming, time){
         const item = document.createElement('li');
         const timeEl = document.createElement('span');
         const titleEl = document.createElement('span');
-        const day = dayLabel(entry.dayOffset, time);
+        const day = dayLabel(entry, time);
         timeEl.className = 'time';
         timeEl.textContent = (day ? day + ' ' : '') + entry.program.start;
         titleEl.className = 'program-title';
