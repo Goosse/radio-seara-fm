@@ -223,7 +223,7 @@ async function determineClosestStream() {
 }
 
 function initializePage(){
-    updateLiveBanner();
+    updateLiveSchedule();
     updateBackButtonVisibility();
     // setupYouTubeAutoplay(); // COMMENTED OUT - Disabled to avoid interference with live audio streams
 }
@@ -242,105 +242,160 @@ function updateBackButtonVisibility() {
     }
 }
 
-const liveProgrammingSchedule = [
-    {
-        title: 'Razão para Viver',
-        description: 'Antes de enfrentar os desafios do dia alimente a sua fé. O Pr. Fernando Bochio leva a verdade bíblica com excelência e prática.',
-        days: [1, 2, 3, 4, 5], // Seg.–Sex.
-        start: '06:00',
-        end: '06:30'
-    },
-    {
-        title: 'Céu Azul',
-        description: 'Moda boa, forró e sertanejo gospel com o João Lucas Barroso.',
-        days: [1, 2, 3, 4, 5],
-        start: '06:30',
-        end: '08:00'
-    },
-    {
-        title: 'Uma Vida a Dois',
-        description: 'Casamento é uma construção diária. Viva uma jornada de renovação e transformação no seu casamento. Uma pausa especial para ouvir princípios que abençoam uma vida a dois. Da editora Pão Diário.',
-        days: [0, 1, 2, 3, 4, 5, 6],
-        start: '14:00',
-        end: '14:30'
-    },
-    {
-        title: 'Amor Maior',
-        description: 'Com o Luís Augusto. Louvores que acalmam a alma. Mensagens que fortalecem a fé.',
-        days: [1, 2, 3, 4, 5],
-        start: '15:00',
-        end: '17:00'
-    },
-    {
-        title: 'Véin de 70 - Forró do Lima',
-        description: 'Fim de tarde com muito forró e alegria. Fala véin! O véi chegou!',
-        days: [1, 2, 3, 4, 5],
-        start: '17:00',
-        end: '19:00'
-    },
-    {
-        title: 'Voz do Brasil',
-        description: 'O programa oficial de informações do governo federal. Fique ligado para saber as principais ações, serviços e notícias que impactam o nosso país.',
-        days: [1, 2, 3, 4, 5],
-        start: '21:00',
-        end: '22:00'
-    },
-    {
-        title: 'Uma Vida a Dois',
-        description: 'Casamento é uma construção diária. Viva uma jornada de renovação e transformação no seu casamento. Uma pausa especial para ouvir princípios que abençoam uma vida a dois. Da editora Pão Diário.',
-        days: [0, 1, 2, 3, 4, 5, 6],
-        start: '23:30',
-        end: '00:00'
-    },
-    {
-        title: 'Especial Seara',
-        description: '',
-        days: [0], // Domingo
-        start: '12:00',
-        end: '13:00'
+//Mark: Live Schedule
+// The schedule is defined in LiveSchedule.swift and embedded in the page as JSON.
+function getLiveSchedule(){
+    const dataEl = document.getElementById('live-schedule');
+    if(!dataEl){
+        return null;
     }
-];
+    try {
+        return JSON.parse(dataEl.textContent);
+    } catch (error) {
+        console.error('Invalid live schedule data:', error);
+        return null;
+    }
+}
 
-const defaultLiveProgram = {
-    title: 'Ao Vivo',
-    description: 'Louvores, mensagens e participação dos ouvintes com a equipe Rádio Seara.'
-};
+// Program times are station time, so use Nova Russas' clock rather than the listener's.
+const STATION_TIME_FORMAT = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Fortaleza',
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23'
+});
+const WEEKDAY_INDEX = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+const WEEKDAY_NAMES = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
 
+function stationTime(date){
+    const parts = {};
+    STATION_TIME_FORMAT.formatToParts(date).forEach(part => {
+        parts[part.type] = part.value;
+    });
+    return {
+        day: WEEKDAY_INDEX[parts.weekday],
+        minutes: (Number(parts.hour) % 24) * 60 + Number(parts.minute)
+    };
+}
 
 function timeToMinutes(time){
     const [hours, minutes] = time.split(':').map(Number);
     return hours * 60 + minutes;
 }
 
-function findProgramFor(date){
-    const day = date.getDay(); // 0 - Sunday
-    const currentMinutes = date.getHours() * 60 + date.getMinutes();
-
-    return liveProgrammingSchedule.find(program => {
-        if(!program.days.includes(day)){
+// Returns the index of the program on the air, or -1 when none is.
+function findProgramIndex(programs, time){
+    return programs.findIndex(program => {
+        if(!program.days.includes(time.day)){
             return false;
         }
         const start = timeToMinutes(program.start);
         const end = timeToMinutes(program.end);
         if(end < start){
             // Overnight program (e.g., 22:00 - 02:00)
-            return currentMinutes >= start || currentMinutes < end;
+            return time.minutes >= start || time.minutes < end;
         }
-        return currentMinutes >= start && currentMinutes < end;
-    }) || defaultLiveProgram;
+        return time.minutes >= start && time.minutes < end;
+    });
 }
 
-function updateLiveBanner(now = new Date()){
+// The next `count` program starts within the coming week, soonest first.
+function findUpcomingPrograms(programs, time, count){
+    const upcoming = [];
+    programs.forEach(program => {
+        const start = timeToMinutes(program.start);
+        for(let dayOffset = 0; dayOffset <= 7; dayOffset++){
+            if(!program.days.includes((time.day + dayOffset) % 7)){
+                continue;
+            }
+            const minutesUntil = dayOffset * 24 * 60 + start - time.minutes;
+            if(minutesUntil > 0){
+                upcoming.push({ program, minutesUntil, dayOffset });
+            }
+        }
+    });
+    return upcoming.sort((a, b) => a.minutesUntil - b.minutesUntil).slice(0, count);
+}
+
+function dayLabel(entry, time){
+    // A program starting at midnight tonight reads better as "às 00:00" than "amanhã às 00:00".
+    if(entry.dayOffset === 0 || (entry.dayOffset === 1 && entry.program.start === '00:00')){
+        return '';
+    }
+    if(entry.dayOffset === 1){
+        return 'amanhã';
+    }
+    return WEEKDAY_NAMES[(time.day + entry.dayOffset) % 7];
+}
+
+function describeNextProgram(next, time){
+    const day = dayLabel(next, time);
+    return next.program.title + ' ' + (day ? day + ' ' : '') + 'às ' + next.program.start;
+}
+
+function renderUpcomingList(listEl, upcoming, time){
+    listEl.replaceChildren(...upcoming.map(entry => {
+        const item = document.createElement('li');
+        const timeEl = document.createElement('span');
+        const titleEl = document.createElement('span');
+        const day = dayLabel(entry, time);
+        timeEl.className = 'time';
+        timeEl.textContent = (day ? day + ' ' : '') + entry.program.start;
+        titleEl.className = 'program-title';
+        titleEl.textContent = entry.program.title;
+        item.append(timeEl, titleEl);
+        return item;
+    }));
+}
+
+function updateLiveSchedule(now = new Date()){
+    const schedule = getLiveSchedule();
+    if(!schedule){
+        return;
+    }
+    const time = stationTime(now);
+    const currentIndex = findProgramIndex(schedule.programs, time);
+    updateLiveBanner(schedule, currentIndex, time);
+    highlightCurrentProgram(currentIndex, time);
+}
+
+function updateLiveBanner(schedule, currentIndex, time){
     const titleEl = document.getElementById('live-program-title');
     const descriptionEl = document.getElementById('live-program-description');
     if(!titleEl || !descriptionEl){
         return;
     }
 
-    const program = findProgramFor(now);
+    const program = currentIndex === -1 ? schedule.fallback : schedule.programs[currentIndex];
     titleEl.textContent = program.title;
     descriptionEl.textContent = program.description;
+
+    const upcoming = findUpcomingPrograms(schedule.programs, time, 3);
+    const listEl = document.getElementById('live-upcoming-list');
+    if(listEl){
+        renderUpcomingList(listEl, upcoming, time);
+    }
+
+    const nextEl = document.getElementById('live-program-next');
+    if(nextEl){
+        nextEl.textContent = upcoming.length ? describeNextProgram(upcoming[0], time) : 'Ver programação completa';
+    }
 }
+
+function highlightCurrentProgram(currentIndex, time){
+    document.querySelectorAll('.schedule-day').forEach(dayEl => {
+        dayEl.classList.toggle('today', Number(dayEl.dataset.day) === time.day);
+    });
+    document.querySelectorAll('.schedule-program').forEach(programEl => {
+        const onAir = Number(programEl.dataset.day) === time.day &&
+                      Number(programEl.dataset.programIndex) === currentIndex;
+        programEl.classList.toggle('on-air', onAir);
+    });
+}
+
+// Keep the banner and highlight current as programs start and end.
+setInterval(() => updateLiveSchedule(), 60 * 1000);
 
 //Mark: Player Controls
 
