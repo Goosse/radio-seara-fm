@@ -224,6 +224,7 @@ async function determineClosestStream() {
 
 function initializePage(){
     updateLiveSchedule();
+    renderListenProgress();
     updateBackButtonVisibility();
     // setupYouTubeAutoplay(); // COMMENTED OUT - Disabled to avoid interference with live audio streams
 }
@@ -459,6 +460,182 @@ if('mediaSession' in navigator) {
       }
   });
 }    
+
+// Lock-screen and headset seeking, only while an episode is loaded.
+const EPISODE_SEEK_ACTIONS = {
+    seekbackward: details => skipBy(-(details.seekOffset || 15)),
+    seekforward: details => skipBy(details.seekOffset || 30),
+    seekto: details => seekTo(details.seekTime)
+};
+
+function setEpisodeSeekHandlers(enabled){
+    if (!('mediaSession' in navigator)) return;
+    Object.entries(EPISODE_SEEK_ACTIONS).forEach(([action, handler]) => {
+        try {
+            navigator.mediaSession.setActionHandler(action, enabled ? handler : null);
+        } catch (error) {} // Older browsers reject actions they don't know.
+    });
+    if (!enabled && navigator.mediaSession.setPositionState) {
+        try {
+            navigator.mediaSession.setPositionState();
+        } catch (error) {}
+    }
+}
+
+function updatePositionState(){
+    if (!('mediaSession' in navigator) || !navigator.mediaSession.setPositionState || !currentEpisodeUrl) return;
+    const duration = episodeDuration();
+    if (!(duration > 0)) return;
+    try {
+        navigator.mediaSession.setPositionState({
+            duration: duration,
+            playbackRate: stream.playbackRate,
+            position: Math.min(stream.currentTime, duration)
+        });
+    } catch (error) {}
+}
+['seeked', 'ratechange', 'play', 'pause'].forEach(type => stream.addEventListener(type, updatePositionState));
+
+//Mark: Skip and Speed
+const PLAYBACK_RATES = [1, 1.25, 1.5, 2];
+
+function episodeDuration(){
+    return Number.isFinite(stream.duration) && stream.duration > 0 ? stream.duration : streamFullTime;
+}
+
+function skipBy(seconds){
+    seekTo(stream.currentTime + seconds);
+}
+
+function seekTo(seconds){
+    if (!(streamFullTime > 0)) return;
+    stream.currentTime = Math.min(Math.max(seconds, 0), episodeDuration());
+    updateScrubber();
+    saveCurrentProgress();
+}
+
+function savedPlaybackRate(){
+    const rate = Number(localStorage.getItem('playbackRate'));
+    return PLAYBACK_RATES.includes(rate) ? rate : 1;
+}
+
+function applyPlaybackRate(rate){
+    stream.defaultPlaybackRate = rate;
+    stream.playbackRate = rate;
+    const button = document.getElementById('speed-toggle');
+    if (button) {
+        button.textContent = String(rate).replace('.', ',') + '×';
+    }
+}
+
+function cycleSpeed(){
+    const next = PLAYBACK_RATES[(PLAYBACK_RATES.indexOf(stream.playbackRate) + 1) % PLAYBACK_RATES.length];
+    localStorage.setItem('playbackRate', next);
+    applyPlaybackRate(next);
+}
+
+//Mark: Listening Progress
+// Each episode's position is kept on the listener's device, keyed by audio URL.
+const PROGRESS_KEY = 'listenProgress';
+const PROGRESS_MAX_ENTRIES = 50;
+const PROGRESS_SAVE_INTERVAL = 5000;
+const RESUME_MIN_SECONDS = 15;
+const RESUME_REWIND_SECONDS = 20; // Replay a little so listeners can pick the thread back up.
+const FINISHED_MARGIN_SECONDS = 30;
+
+// Set only after the saved position is restored, so a fresh load can't overwrite it with 0.
+let currentEpisodeUrl = null;
+let pendingEpisodeUrl = null;
+let lastProgressSave = 0;
+
+function loadProgress(){
+    try {
+        return JSON.parse(localStorage.getItem(PROGRESS_KEY)) || {};
+    } catch (error) {
+        return {};
+    }
+}
+
+function saveProgress(url, position, duration){
+    const progress = loadProgress();
+    const previous = progress[url];
+    progress[url] = {
+        t: Math.floor(position),
+        d: Math.round(duration),
+        done: position >= duration - FINISHED_MARGIN_SECONDS || Boolean(previous && previous.done),
+        updated: Date.now()
+    };
+    Object.keys(progress)
+        .sort((a, b) => progress[b].updated - progress[a].updated)
+        .slice(PROGRESS_MAX_ENTRIES)
+        .forEach(oldUrl => delete progress[oldUrl]);
+    try {
+        localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress));
+    } catch (error) {} // Storage full or disabled (private browsing).
+    renderListenProgress(url);
+}
+
+function saveCurrentProgress(){
+    lastProgressSave = Date.now();
+    const duration = episodeDuration();
+    if (currentEpisodeUrl && duration > 0) {
+        saveProgress(currentEpisodeUrl, stream.currentTime, duration);
+    }
+}
+
+function isUnfinished(entry){
+    return entry.t >= RESUME_MIN_SECONDS && entry.t < entry.d - FINISHED_MARGIN_SECONDS;
+}
+
+stream.addEventListener('loadedmetadata', () => {
+    if (!pendingEpisodeUrl) return;
+    const entry = loadProgress()[pendingEpisodeUrl];
+    if (entry && isUnfinished(entry)) {
+        stream.currentTime = Math.max(entry.t - RESUME_REWIND_SECONDS, 0);
+    }
+    currentEpisodeUrl = pendingEpisodeUrl;
+    pendingEpisodeUrl = null;
+    updateScrubber();
+    updatePositionState();
+});
+stream.addEventListener('pause', saveCurrentProgress);
+stream.addEventListener('ended', () => {
+    saveCurrentProgress();
+    removeClass("bar-play-button", "playing");
+    clearInterval(scrubUpdater);
+});
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+        saveCurrentProgress();
+    }
+});
+
+function renderListenProgress(onlyUrl){
+    const progress = loadProgress();
+    document.querySelectorAll('[data-audio-url]').forEach(item => {
+        const url = item.dataset.audioUrl;
+        const info = item.querySelector('.info');
+        if ((onlyUrl && url !== onlyUrl) || !info) return;
+
+        const entry = progress[url];
+        const unfinished = entry && isUnfinished(entry);
+        let el = info.querySelector('.listen-progress');
+        if (!entry || !(unfinished || entry.done)) {
+            if (el) el.remove();
+            return;
+        }
+        if (!el) {
+            el = document.createElement('div');
+            el.className = 'listen-progress';
+            el.innerHTML = '<span class="track"><span class="fill"></span></span><span class="label"></span>';
+            const anchor = info.querySelector('.date-time') || info.querySelector('h3');
+            anchor ? anchor.after(el) : info.prepend(el);
+        }
+        el.classList.toggle('finished', !unfinished);
+        el.querySelector('.fill').style.width = (unfinished ? entry.t / entry.d * 100 : 100) + '%';
+        el.querySelector('.label').textContent = unfinished ? 'Continuar de ' + formatTime(entry.t) : 'Ouvido ✓';
+    });
+}
 async function playLiveStream(){
     let streamId = await determineClosestStream();
     switchStream(streamId);
@@ -478,11 +655,17 @@ async function switchStream(streamId){ //Caled ny the toggle buttons and the pla
 
     const targetStreamUrl = STREAM_CONFIG[streamId].url;
   
+    saveCurrentProgress();
+    currentEpisodeUrl = null;
+    pendingEpisodeUrl = null;
+    setEpisodeSeekHandlers(false);
+
     sourceEl.setAttribute('src', targetStreamUrl);
     streamFullTime = 0;
     streamTitle = 'Rádio Seara Ao Vivo';
     
     stream.load();
+    applyPlaybackRate(1); // The live stream always plays at normal speed.
 
     if (wasPlaying) {
         playStream();
@@ -592,6 +775,7 @@ function showStreamToggle() {
     if (scrubber) {
         addClass("scrubber", "hidden");
     }
+    addClass("episode-controls", "hidden");
     if (toggleWrapper) {
         removeClass("stream-toggle-wrapper", "hidden");
     }
@@ -603,6 +787,7 @@ function showScrubber() {
     if (scrubber) {
         removeClass("scrubber", "hidden");
     }
+    removeClass("episode-controls", "hidden");
     if (toggleWrapper) {
         addClass("stream-toggle-wrapper", "hidden");
     }
@@ -643,6 +828,10 @@ function playEpisode(audioUrl, title, time, programName, imageUrl){
         return;
     }
 
+    saveCurrentProgress();
+    currentEpisodeUrl = null;
+    pendingEpisodeUrl = audioUrl;
+
     player.getElementsByTagName('source')[0].setAttribute('src', audioUrl);
     playerTitle.innerHTML = title;
     if (playerSubtitle) {
@@ -670,8 +859,10 @@ function playEpisode(audioUrl, title, time, programName, imageUrl){
     
     // Update Media Session metadata for lock screen
     updateMediaSessionForEpisode(title, programName, imageUrl);
+    setEpisodeSeekHandlers(true);
     
     stream.load();
+    applyPlaybackRate(savedPlaybackRate());
     playStream()
 }
 
@@ -734,16 +925,21 @@ function updateScrubber(){
     scrubberActiveRange.style.width = x + "px"
     displayFormattedCurrentTime(stream.currentTime)
     }
+    if (Date.now() - lastProgressSave > PROGRESS_SAVE_INTERVAL) {
+        saveCurrentProgress();
+    }
 }
 
-function displayFormattedCurrentTime(seconds){
-
-    var currentTime = document.getElementById("current-time")
+function formatTime(seconds){
     var formattedTime = new Date(seconds * 1000).toISOString().substr(11, 8)
     if (formattedTime.substr(0,2) == "00") {
         formattedTime = formattedTime.substr(3, formattedTime.length - 3)
     }
-    currentTime.innerHTML = formattedTime
+    return formattedTime
+}
+
+function displayFormattedCurrentTime(seconds){
+    document.getElementById("current-time").innerHTML = formatTime(seconds)
 }
 
 if (document.getElementById("scrubber-slider")){

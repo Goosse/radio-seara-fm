@@ -686,6 +686,31 @@ iframe {
   height: 40px;
 }
 
+.listen-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.listen-progress .track {
+  flex: 0 1 120px;
+  height: 4px;
+  border-radius: 2px;
+  background-color: rgba(255, 255, 255, 0.5);
+  overflow: hidden;
+}
+.listen-progress .fill {
+  display: block;
+  height: 100%;
+  background-color: #3F3F3F;
+}
+.listen-progress .label {
+  font-size: 0.8em;
+}
+.listen-progress.finished .track {
+  display: none;
+}
+
 .tag {
   margin-right: 10px;
   color: #fff;
@@ -1188,8 +1213,52 @@ iframe {
   margin-left: 10px;
   position: relative;
 }
-#bar-player-wrapper .slider-wrapper, #bar-player-wrapper .stream-toggle-wrapper {
+#bar-player-wrapper .slider-wrapper, #bar-player-wrapper .stream-toggle-wrapper, #bar-player-wrapper .episode-controls {
   display: none;
+}
+#bar-player-wrapper #bar-player-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.episode-controls {
+  align-items: center;
+  gap: 6px;
+  margin-left: 10px;
+}
+.episode-controls button {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: #3F3F3F;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.episode-controls .skip {
+  width: 32px;
+  height: 32px;
+}
+.episode-controls .skip svg {
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
+}
+.episode-controls .skip text {
+  font-family: "Open Sans";
+  font-size: 6.5px;
+  font-weight: 600;
+}
+.episode-controls .speed {
+  min-width: 46px;
+  height: 24px;
+  padding: 0 6px;
+  border: solid 1px #949494;
+  border-radius: 12px;
+  font-family: "Open Sans";
+  font-size: 0.8em;
 }
 
 #bar-player-wrapper.full {
@@ -1206,12 +1275,29 @@ iframe {
 }
 #bar-player-wrapper.full #bar-player-title {
   font-size: 1.5em;
+  display: block;
 }
 #bar-player-wrapper.full .flex {
   display: grid;
-  grid-template-rows: 1fr 20px;
+  grid-template-rows: 1fr 20px auto;
   grid-gap: 10px;
   height: 100%;
+}
+#bar-player-wrapper.full .episode-controls {
+  display: flex;
+  justify-content: center;
+  gap: 36px;
+  margin: 24px 0 0;
+}
+#bar-player-wrapper.full .episode-controls .skip {
+  width: 48px;
+  height: 48px;
+}
+#bar-player-wrapper.full .episode-controls .speed {
+  height: 32px;
+  min-width: 60px;
+  border-radius: 16px;
+  font-size: 1em;
 }
 #bar-player-wrapper.full .close {
   grid-row: 1;
@@ -1339,10 +1425,42 @@ iframe {
 }
 @media only screen and (min-width: 768px) {
   #bar-player-wrapper {
-    grid-template-columns: 60px 6fr 60px 1fr 22px;
+    grid-template-columns: 60px fit-content(20%) minmax(160px, 1fr) auto auto auto auto minmax(80px, 140px) 22px;
+    grid-template-areas: "art title scrub back play forward speed volume close";
+  }
+  #bar-player-wrapper .flex, #bar-player-wrapper .episode-controls {
+    display: contents;
   }
   #bar-player-wrapper .slider-wrapper {
     display: flex;
+  }
+  #bar-player-wrapper #bar-player-artwork {
+    grid-area: art;
+  }
+  #bar-player-wrapper .title-wrapper {
+    grid-area: title;
+  }
+  #bar-player-wrapper #scrubber, #bar-player-wrapper #stream-toggle-wrapper {
+    grid-area: scrub;
+    margin-left: 0;
+  }
+  #bar-player-wrapper #skip-back {
+    grid-area: back;
+  }
+  #bar-player-wrapper #bar-play-button {
+    grid-area: play;
+  }
+  #bar-player-wrapper #skip-forward {
+    grid-area: forward;
+  }
+  #bar-player-wrapper #speed-toggle {
+    grid-area: speed;
+  }
+  #bar-player-wrapper #volume {
+    grid-area: volume;
+  }
+  #bar-player-wrapper .close {
+    grid-area: close;
   }
 }
 @media only screen and (min-width: 1024px) {
