@@ -1249,7 +1249,7 @@ iframe {
 .episode-controls .skip text {
   font-family: "Open Sans";
   font-size: 6.5px;
-  font-weight: 700;
+  font-weight: 600;
 }
 .episode-controls .speed {
   min-width: 46px;
@@ -1425,13 +1425,8 @@ iframe {
 }
 @media only screen and (min-width: 768px) {
   #bar-player-wrapper {
-    height: auto;
-    padding: 8px 10px;
-    grid-template-columns: 60px minmax(0, 1.4fr) minmax(70px, 1fr) auto minmax(70px, 1fr) auto minmax(60px, 120px) 22px;
-    grid-template-rows: auto auto;
-    grid-template-areas: "art title back  play  forward speed volume close" "art title scrub scrub scrub   speed volume close";
-    column-gap: 12px;
-    row-gap: 2px;
+    grid-template-columns: 60px fit-content(20%) minmax(160px, 1fr) auto auto auto auto minmax(80px, 140px) 22px;
+    grid-template-areas: "art title scrub back play forward speed volume close";
   }
   #bar-player-wrapper .flex, #bar-player-wrapper .episode-controls {
     display: contents;
@@ -1445,22 +1440,18 @@ iframe {
   #bar-player-wrapper .title-wrapper {
     grid-area: title;
   }
+  #bar-player-wrapper #scrubber, #bar-player-wrapper #stream-toggle-wrapper {
+    grid-area: scrub;
+    margin-left: 0;
+  }
   #bar-player-wrapper #skip-back {
     grid-area: back;
-    justify-self: end;
   }
   #bar-player-wrapper #bar-play-button {
     grid-area: play;
-    width: 44px;
-    height: 44px;
-  }
-  #bar-player-wrapper #bar-play-button .loading-spinner {
-    width: calc(100% + 2px);
-    height: calc(100% + 2px);
   }
   #bar-player-wrapper #skip-forward {
     grid-area: forward;
-    justify-self: start;
   }
   #bar-player-wrapper #speed-toggle {
     grid-area: speed;
@@ -1470,40 +1461,6 @@ iframe {
   }
   #bar-player-wrapper .close {
     grid-area: close;
-  }
-  #bar-player-wrapper #scrubber, #bar-player-wrapper #stream-toggle-wrapper {
-    grid-area: scrub;
-    margin: 0;
-  }
-  #bar-player-wrapper #scrubber {
-    display: grid;
-    grid-template-columns: auto 1fr auto;
-    align-items: center;
-    column-gap: 8px;
-    font-size: 0.8em;
-  }
-  #bar-player-wrapper .scrub-time {
-    display: contents;
-  }
-  #bar-player-wrapper #current-time {
-    grid-column: 1;
-    grid-row: 1;
-    margin: 0;
-    padding: 0;
-    border: none;
-  }
-  #bar-player-wrapper #scrubber-slider {
-    grid-column: 2;
-    grid-row: 1;
-    width: auto;
-    margin: 0;
-  }
-  #bar-player-wrapper .stream-toggle-button {
-    padding: 4px 12px;
-  }
-  #bar-player-wrapper #total-time {
-    grid-column: 3;
-    grid-row: 1;
   }
 }
 @media only screen and (min-width: 1024px) {
