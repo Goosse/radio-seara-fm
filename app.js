@@ -540,6 +540,7 @@ const PROGRESS_KEY = 'listenProgress';
 const PROGRESS_MAX_ENTRIES = 50;
 const PROGRESS_SAVE_INTERVAL = 5000;
 const RESUME_MIN_SECONDS = 15;
+const RESUME_REWIND_SECONDS = 20; // Replay a little so listeners can pick the thread back up.
 const FINISHED_MARGIN_SECONDS = 30;
 
 // Set only after the saved position is restored, so a fresh load can't overwrite it with 0.
@@ -590,7 +591,7 @@ stream.addEventListener('loadedmetadata', () => {
     if (!pendingEpisodeUrl) return;
     const entry = loadProgress()[pendingEpisodeUrl];
     if (entry && isUnfinished(entry)) {
-        stream.currentTime = entry.t;
+        stream.currentTime = Math.max(entry.t - RESUME_REWIND_SECONDS, 0);
     }
     currentEpisodeUrl = pendingEpisodeUrl;
     pendingEpisodeUrl = null;
