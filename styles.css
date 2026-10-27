@@ -1424,11 +1424,11 @@ iframe {
     display: flex;
   }
   #bar-player-wrapper .title-wrapper {
-    flex: 1 1 0;
-    min-width: 0;
+    flex: 0 1 auto;
+    max-width: 40%;
   }
   #bar-player-wrapper #scrubber {
-    flex: 1 1 0;
+    flex: 1 1 auto;
     min-width: 160px;
   }
   #bar-player-wrapper .episode-controls {
