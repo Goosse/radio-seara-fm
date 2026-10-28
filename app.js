@@ -285,20 +285,33 @@ function timeToMinutes(time){
     return hours * 60 + minutes;
 }
 
-// Returns the index of the program on the air, or -1 when none is.
+function isAiring(program, time){
+    if(!program.days.includes(time.day)){
+        return false;
+    }
+    const start = timeToMinutes(program.start);
+    const end = timeToMinutes(program.end);
+    if(end < start){
+        // Overnight program (e.g., 22:00 - 02:00)
+        return time.minutes >= start || time.minutes < end;
+    }
+    return time.minutes >= start && time.minutes < end;
+}
+
+function programLength(program){
+    const length = timeToMinutes(program.end) - timeToMinutes(program.start);
+    return length > 0 ? length : length + 24 * 60;
+}
+
+// Indexes of every program on the air; more than one when a program airs inside a longer one.
+function findAiringIndexes(programs, time){
+    return programs.map((program, index) => index).filter(index => isAiring(programs[index], time));
+}
+
+// Returns the index of the program on the air, or -1 when none is. A program airing inside a longer one wins.
 function findProgramIndex(programs, time){
-    return programs.findIndex(program => {
-        if(!program.days.includes(time.day)){
-            return false;
-        }
-        const start = timeToMinutes(program.start);
-        const end = timeToMinutes(program.end);
-        if(end < start){
-            // Overnight program (e.g., 22:00 - 02:00)
-            return time.minutes >= start || time.minutes < end;
-        }
-        return time.minutes >= start && time.minutes < end;
-    });
+    return findAiringIndexes(programs, time).reduce((best, index) =>
+        best === -1 || programLength(programs[index]) < programLength(programs[best]) ? index : best, -1);
 }
 
 // The next `count` program starts within the coming week, soonest first.
@@ -358,7 +371,7 @@ function updateLiveSchedule(now = new Date()){
     const time = stationTime(now);
     const currentIndex = findProgramIndex(schedule.programs, time);
     updateLiveBanner(schedule, currentIndex, time);
-    highlightCurrentProgram(currentIndex, time);
+    highlightCurrentProgram(currentIndex, findAiringIndexes(schedule.programs, time), time);
 }
 
 function updateLiveBanner(schedule, currentIndex, time){
@@ -384,14 +397,16 @@ function updateLiveBanner(schedule, currentIndex, time){
     }
 }
 
-function highlightCurrentProgram(currentIndex, time){
+// The current program gets "on-air"; a longer program it airs inside gets "airing".
+function highlightCurrentProgram(currentIndex, airingIndexes, time){
     document.querySelectorAll('.schedule-day').forEach(dayEl => {
         dayEl.classList.toggle('today', Number(dayEl.dataset.day) === time.day);
     });
     document.querySelectorAll('.schedule-program').forEach(programEl => {
-        const onAir = Number(programEl.dataset.day) === time.day &&
-                      Number(programEl.dataset.programIndex) === currentIndex;
-        programEl.classList.toggle('on-air', onAir);
+        const today = Number(programEl.dataset.day) === time.day;
+        const index = Number(programEl.dataset.programIndex);
+        programEl.classList.toggle('on-air', today && index === currentIndex);
+        programEl.classList.toggle('airing', today && index !== currentIndex && airingIndexes.includes(index));
     });
 }
 

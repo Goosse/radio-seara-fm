@@ -1050,6 +1050,39 @@ iframe {
   background-color: #E31E25;
 }
 
+.schedule-program.airing {
+  border-color: rgba(236, 159, 23, 0.6);
+}
+
+.schedule-nested {
+  grid-column: 1/-1;
+  list-style: none;
+  margin: 10px 0 0 0;
+  padding: 0 0 0 12px;
+  border-left: solid 2px rgba(255, 255, 255, 0.3);
+}
+.schedule-nested .schedule-program {
+  grid-template-columns: 95px 1fr;
+  padding: 6px 0;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+}
+.schedule-nested .schedule-program .schedule-time {
+  font-weight: 500;
+  font-size: 0.9em;
+}
+.schedule-nested .schedule-program h3 {
+  font-size: 0.95em;
+}
+.schedule-nested .schedule-program.on-air {
+  background: none;
+}
+.schedule-nested .schedule-program.on-air h3, .schedule-nested .schedule-program.on-air .schedule-time {
+  color: #EC9F17;
+}
+
 .schedule-fallback {
   font-size: 12px;
   margin: 0 0 10px 0;
@@ -1073,6 +1106,9 @@ iframe {
   }
   .schedule-program {
     grid-template-columns: 120px 1fr;
+  }
+  .schedule-nested {
+    grid-column: 2;
   }
 }
 @media only screen and (min-width: 1024px) {
