@@ -224,6 +224,7 @@ async function determineClosestStream() {
 
 function initializePage(){
     updateLiveSchedule();
+    renderMyList();
     renderListenProgress();
     updateBackButtonVisibility();
     // setupYouTubeAutoplay(); // COMMENTED OUT - Disabled to avoid interference with live audio streams
@@ -618,6 +619,7 @@ stream.addEventListener('ended', () => {
     saveCurrentProgress();
     removeClass("bar-play-button", "playing");
     clearInterval(scrubUpdater);
+    playNextInMyList(currentEpisodeUrl);
 });
 document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
@@ -651,6 +653,199 @@ function renderListenProgress(onlyUrl){
         el.querySelector('.label').textContent = unfinished ? 'Continuar de ' + formatTime(entry.t) : 'Ouvido ✓';
     });
 }
+
+//Mark: Minha Lista
+// The listener's own queue of episodes, kept on this device. When one ends, it leaves the list and the next one plays.
+const MY_LIST_KEY = 'myList';
+
+function getMyList(){
+    try {
+        const list = JSON.parse(localStorage.getItem(MY_LIST_KEY));
+        return Array.isArray(list) ? list : [];
+    } catch (error) {
+        return [];
+    }
+}
+
+function saveMyList(list){
+    try {
+        localStorage.setItem(MY_LIST_KEY, JSON.stringify(list));
+    } catch (error) {}
+    renderMyList();
+}
+
+function myListIndex(url, list = getMyList()){
+    return url ? list.findIndex(entry => entry.url === url) : -1;
+}
+
+function episodeFromCard(card){
+    return {
+        url: card.dataset.audioUrl,
+        title: card.dataset.title,
+        program: card.dataset.program,
+        image: card.dataset.image,
+        path: card.dataset.path,
+        duration: Number(card.dataset.duration) || 0
+    };
+}
+
+function toggleMyList(button){
+    const card = button.closest('[data-audio-url]');
+    if (!card) return;
+    const list = getMyList();
+    const index = myListIndex(card.dataset.audioUrl, list);
+    if (index === -1) {
+        list.push(episodeFromCard(card));
+    } else {
+        list.splice(index, 1);
+    }
+    saveMyList(list);
+}
+
+function playingListIndex(list){
+    return myListIndex(currentEpisodeUrl || pendingEpisodeUrl, list);
+}
+
+// The playing episode keeps its place, so nothing can be moved onto or past it.
+function canMoveInMyList(index, offset, list){
+    const to = index + offset;
+    const playing = playingListIndex(list);
+    return to >= 0 && to < list.length && index !== playing && to !== playing;
+}
+
+function moveInMyList(url, offset){
+    const list = getMyList();
+    const from = myListIndex(url, list);
+    const to = from + offset;
+    if (from === -1 || !canMoveInMyList(from, offset, list)) return;
+    list.splice(to, 0, list.splice(from, 1)[0]);
+    saveMyList(list);
+}
+
+function removeFromMyList(url){
+    saveMyList(getMyList().filter(entry => entry.url !== url));
+}
+
+function playListEntry(entry){
+    playEpisode(entry.url, entry.title, entry.duration, entry.program, entry.image);
+}
+
+function playMyList(){
+    const list = getMyList();
+    if (list.length) {
+        playListEntry(list[0]);
+    }
+}
+
+// After a list episode, the one below it plays next; after any other episode, the top of the list does.
+function nextInMyList(url, list = getMyList()){
+    const index = myListIndex(url, list);
+    return list[index + 1] || null;
+}
+
+function playNextInMyList(finishedUrl){
+    const list = getMyList();
+    const next = nextInMyList(finishedUrl, list);
+    const index = myListIndex(finishedUrl, list);
+    if (index !== -1) {
+        list.splice(index, 1);
+        saveMyList(list);
+    }
+    if (next) {
+        playListEntry(next);
+    }
+}
+
+function skipInMyList(offset){
+    const list = getMyList();
+    const url = currentEpisodeUrl || pendingEpisodeUrl;
+    const index = myListIndex(url, list);
+    const target = offset > 0 ? nextInMyList(url, list) : (index > 0 ? list[index - 1] : null);
+    if (target) {
+        playListEntry(target);
+    }
+}
+
+// "A seguir" in the player, plus next/previous on the lock screen, while an episode plays.
+function updateMyListPlayer(){
+    const list = getMyList();
+    const url = currentEpisodeUrl || pendingEpisodeUrl;
+    const index = myListIndex(url, list);
+    const next = url ? nextInMyList(url, list) : null;
+    const nextEl = document.getElementById('bar-player-next');
+    if (nextEl) {
+        nextEl.textContent = next ? 'A seguir: ' + next.title : '';
+        nextEl.classList.toggle('hidden', !next);
+    }
+    if ('mediaSession' in navigator) {
+        const setHandler = (action, handler) => {
+            try {
+                navigator.mediaSession.setActionHandler(action, handler);
+            } catch (error) {}
+        };
+        setHandler('nexttrack', next ? () => skipInMyList(1) : null);
+        setHandler('previoustrack', index > 0 ? () => skipInMyList(-1) : null);
+    }
+}
+
+function renderMyList(){
+    const list = getMyList();
+    const urls = new Set(list.map(entry => entry.url));
+    document.querySelectorAll('.add-to-list').forEach(button => {
+        const card = button.closest('[data-audio-url]');
+        const inList = Boolean(card && urls.has(card.dataset.audioUrl));
+        button.classList.toggle('in-list', inList);
+        button.textContent = inList ? '✓ Na lista' : '+ Minha lista';
+    });
+    const count = document.getElementById('my-list-count');
+    if (count) {
+        count.textContent = list.length;
+        count.classList.toggle('hidden', list.length === 0);
+    }
+    renderMyListPage(list);
+    updateMyListPlayer();
+}
+
+function renderMyListPage(list){
+    const listEl = document.getElementById('my-list');
+    if (!listEl) return;
+    listEl.replaceChildren(...list.map((entry, index) => myListCard(entry, index, list)));
+    removeClass('my-list-empty', 'hidden');
+    removeClass('my-list-play', 'hidden');
+    addClass(list.length ? 'my-list-empty' : 'my-list-play', 'hidden');
+    renderListenProgress();
+}
+
+function myListCard(entry, index, list){
+    const playing = index === playingListIndex(list);
+    const item = document.createElement('li');
+    item.dataset.audioUrl = entry.url;
+    item.classList.toggle('now-playing', playing);
+    item.innerHTML =
+        '<article>' +
+            '<button class="play" aria-label="Tocar"></button>' +
+            '<div class="info"><h3><a></a></h3><p class="date-time"></p></div>' +
+            '<div class="episode-actions my-list-actions">' +
+                '<button class="move" aria-label="Mover para cima">↑</button>' +
+                '<button class="move" aria-label="Mover para baixo">↓</button>' +
+                '<button class="remove">Remover</button>' +
+            '</div>' +
+        '</article>';
+    const link = item.querySelector('h3 a');
+    link.href = entry.path;
+    link.textContent = entry.title;
+    item.querySelector('.date-time').textContent =
+        (playing ? 'Tocando agora · ' : '') +
+        entry.program + (entry.duration ? ' | ' + Math.ceil(entry.duration / 60) + ' min' : '');
+    item.querySelector('.play').onclick = () => playListEntry(entry);
+    const [up, down] = item.querySelectorAll('.move');
+    up.disabled = !canMoveInMyList(index, -1, list);
+    down.disabled = !canMoveInMyList(index, 1, list);
+    up.onclick = () => moveInMyList(entry.url, -1);
+    down.onclick = () => moveInMyList(entry.url, 1);
+    item.querySelector('.remove').onclick = () => removeFromMyList(entry.url);
+    return item;
+}
 async function playLiveStream(){
     let streamId = await determineClosestStream();
     switchStream(streamId);
@@ -674,6 +869,7 @@ async function switchStream(streamId){ //Caled ny the toggle buttons and the pla
     currentEpisodeUrl = null;
     pendingEpisodeUrl = null;
     setEpisodeSeekHandlers(false);
+    renderMyList();
 
     sourceEl.setAttribute('src', targetStreamUrl);
     streamFullTime = 0;
@@ -846,6 +1042,7 @@ function playEpisode(audioUrl, title, time, programName, imageUrl){
     saveCurrentProgress();
     currentEpisodeUrl = null;
     pendingEpisodeUrl = audioUrl;
+    renderMyList();
 
     player.getElementsByTagName('source')[0].setAttribute('src', audioUrl);
     playerTitle.innerHTML = title;
