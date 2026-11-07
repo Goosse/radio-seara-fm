@@ -223,6 +223,7 @@ async function determineClosestStream() {
 }
 
 function initializePage(){
+    localizeSchedule();
     updateLiveSchedule();
     renderMyList();
     renderListenProgress();
@@ -333,30 +334,59 @@ function findUpcomingPrograms(programs, time, count){
     return upcoming.sort((a, b) => a.minutesUntil - b.minutesUntil).slice(0, count);
 }
 
-function dayLabel(entry, time){
+const MINUTES_PER_DAY = 24 * 60;
+const MINUTES_PER_WEEK = 7 * MINUTES_PER_DAY;
+
+function formatMinutes(minutes){
+    const time = (minutes % MINUTES_PER_DAY + MINUTES_PER_DAY) % MINUTES_PER_DAY;
+    return String(Math.floor(time / 60)).padStart(2, '0') + ':' + String(time % 60).padStart(2, '0');
+}
+
+// How many minutes the listener's clock is ahead of the station's; negative when behind (-180 in Kansas in winter).
+function listenerOffset(now){
+    const station = stationTime(now);
+    let offset = (now.getDay() * MINUTES_PER_DAY + now.getHours() * 60 + now.getMinutes()) -
+                 (station.day * MINUTES_PER_DAY + station.minutes);
+    if(offset > MINUTES_PER_WEEK / 2) offset -= MINUTES_PER_WEEK;
+    if(offset < -MINUTES_PER_WEEK / 2) offset += MINUTES_PER_WEEK;
+    return offset;
+}
+
+// When an upcoming program starts, on the listener's clock.
+function localStart(entry, now){
+    const start = new Date(now);
+    start.setSeconds(0, 0);
+    start.setTime(start.getTime() + entry.minutesUntil * 60 * 1000);
+    return start;
+}
+
+function dayLabel(start, now){
+    const days = Math.round((new Date(start).setHours(0, 0, 0, 0) - new Date(now).setHours(0, 0, 0, 0)) / (24 * 60 * 60 * 1000));
     // A program starting at midnight tonight reads better as "às 00:00" than "amanhã às 00:00".
-    if(entry.dayOffset === 0 || (entry.dayOffset === 1 && entry.program.start === '00:00')){
+    if(days === 0 || (days === 1 && start.getHours() === 0 && start.getMinutes() === 0)){
         return '';
     }
-    if(entry.dayOffset === 1){
+    if(days === 1){
         return 'amanhã';
     }
-    return WEEKDAY_NAMES[(time.day + entry.dayOffset) % 7];
+    return WEEKDAY_NAMES[start.getDay()];
 }
 
-function describeNextProgram(next, time){
-    const day = dayLabel(next, time);
-    return next.program.title + ' ' + (day ? day + ' ' : '') + 'às ' + next.program.start;
+function describeNextProgram(next, now){
+    const start = localStart(next, now);
+    const day = dayLabel(start, now);
+    return next.program.title + ' ' + (day ? day + ' ' : '') + 'às ' + formatMinutes(start.getHours() * 60 + start.getMinutes());
 }
 
-function renderUpcomingList(listEl, upcoming, time){
+function renderUpcomingList(listEl, upcoming, now){
     listEl.replaceChildren(...upcoming.map(entry => {
         const item = document.createElement('li');
         const timeEl = document.createElement('span');
         const titleEl = document.createElement('span');
-        const day = dayLabel(entry, time);
+        const start = localStart(entry, now);
+        const day = dayLabel(start, now);
         timeEl.className = 'time';
-        timeEl.textContent = (day ? day + ' ' : '') + entry.program.start;
+        timeEl.textContent = (day ? day + ' ' : '') + formatMinutes(start.getHours() * 60 + start.getMinutes());
         titleEl.className = 'program-title';
         titleEl.textContent = entry.program.title;
         item.append(timeEl, titleEl);
@@ -371,11 +401,11 @@ function updateLiveSchedule(now = new Date()){
     }
     const time = stationTime(now);
     const currentIndex = findProgramIndex(schedule.programs, time);
-    updateLiveBanner(schedule, currentIndex, time);
-    highlightCurrentProgram(currentIndex, findAiringIndexes(schedule.programs, time), time);
+    updateLiveBanner(schedule, currentIndex, time, now);
+    highlightCurrentProgram(currentIndex, findAiringIndexes(schedule.programs, time), time, now);
 }
 
-function updateLiveBanner(schedule, currentIndex, time){
+function updateLiveBanner(schedule, currentIndex, time, now){
     const titleEl = document.getElementById('live-program-title');
     const descriptionEl = document.getElementById('live-program-description');
     if(!titleEl || !descriptionEl){
@@ -389,19 +419,19 @@ function updateLiveBanner(schedule, currentIndex, time){
     const upcoming = findUpcomingPrograms(schedule.programs, time, 3);
     const listEl = document.getElementById('live-upcoming-list');
     if(listEl){
-        renderUpcomingList(listEl, upcoming, time);
+        renderUpcomingList(listEl, upcoming, now);
     }
 
     const nextEl = document.getElementById('live-program-next');
     if(nextEl){
-        nextEl.textContent = upcoming.length ? describeNextProgram(upcoming[0], time) : 'Ver programação completa';
+        nextEl.textContent = upcoming.length ? describeNextProgram(upcoming[0], now) : 'Ver programação completa';
     }
 }
 
-// The current program gets "on-air"; a longer program it airs inside gets "airing".
-function highlightCurrentProgram(currentIndex, airingIndexes, time){
+// Day sections follow the listener's calendar; each program card keeps its station day in data-day.
+function highlightCurrentProgram(currentIndex, airingIndexes, time, now){
     document.querySelectorAll('.schedule-day').forEach(dayEl => {
-        dayEl.classList.toggle('today', Number(dayEl.dataset.day) === time.day);
+        dayEl.classList.toggle('today', Number(dayEl.dataset.day) === now.getDay());
     });
     document.querySelectorAll('.schedule-program').forEach(programEl => {
         const today = Number(programEl.dataset.day) === time.day;
@@ -413,6 +443,78 @@ function highlightCurrentProgram(currentIndex, airingIndexes, time){
 
 // Keep the banner and highlight current as programs start and end.
 setInterval(() => updateLiveSchedule(), 60 * 1000);
+
+// The page is built in station time. When the listener's clock differs, redraw the grid in their own times and days.
+function localizeSchedule(now = new Date()){
+    const schedule = getLiveSchedule();
+    const sections = document.querySelectorAll('.schedule-day');
+    const offset = schedule && sections.length ? listenerOffset(now) : 0;
+    if(offset === 0){
+        return;
+    }
+
+    const byDay = [[], [], [], [], [], [], []];
+    schedule.programs.forEach((program, index) => {
+        program.days.forEach(stationDay => {
+            const start = ((stationDay * MINUTES_PER_DAY + timeToMinutes(program.start) + offset) % MINUTES_PER_WEEK + MINUTES_PER_WEEK) % MINUTES_PER_WEEK;
+            byDay[Math.floor(start / MINUTES_PER_DAY)].push({
+                program, index, stationDay, start: start % MINUTES_PER_DAY, length: programLength(program)
+            });
+        });
+    });
+
+    // Same rule as LiveSchedule.isNested: a shorter program that airs entirely within a longer one.
+    const isNested = (inner, outer) =>
+        outer.start <= inner.start && inner.start + inner.length <= outer.start + outer.length && inner.length < outer.length;
+    sections.forEach(section => {
+        const entries = byDay[Number(section.dataset.day)].sort((a, b) => a.start - b.start);
+        const top = entries.filter(entry => !entries.some(other => isNested(entry, other)));
+        section.querySelector('.schedule-list').replaceChildren(...top.map(entry =>
+            scheduleCard(entry, entries.filter(other => isNested(other, entry)))));
+        section.classList.toggle('hidden', top.length === 0);
+    });
+
+    const description = document.querySelector('.banner .description');
+    const stationNote = 'Horários de Nova Russas, CE.';
+    if(description && description.textContent.includes(stationNote)){
+        const hours = Math.abs(offset) / 60;
+        const amount = String(hours).replace('.', ',') + (hours === 1 ? ' hora' : ' horas');
+        description.textContent = description.textContent.replace(stationNote,
+            'Horários no seu fuso horário. Em Nova Russas, CE, são ' + amount + (offset < 0 ? ' a mais.' : ' a menos.'));
+    }
+}
+
+// Matches the markup of scheduleProgram in Theme+Seara.swift.
+function scheduleCard(entry, nested = []){
+    const item = document.createElement('li');
+    item.className = nested.length ? 'schedule-program has-nested' : 'schedule-program';
+    item.dataset.day = entry.stationDay;
+    item.dataset.programIndex = entry.index;
+
+    const timeEl = document.createElement('p');
+    timeEl.className = 'schedule-time';
+    timeEl.textContent = formatMinutes(entry.start) + ' – ' + formatMinutes(entry.start + entry.length);
+    const info = document.createElement('div');
+    info.className = 'schedule-info';
+    const title = document.createElement('h3');
+    title.textContent = entry.program.title;
+    info.append(title);
+    if(entry.program.description){
+        const description = document.createElement('p');
+        description.className = 'description';
+        description.textContent = entry.program.description;
+        info.append(description);
+    }
+    item.append(timeEl, info);
+
+    if(nested.length){
+        const list = document.createElement('ul');
+        list.className = 'schedule-nested';
+        list.append(...nested.map(inner => scheduleCard(inner)));
+        item.append(list);
+    }
+    return item;
+}
 
 //Mark: Player Controls
 
