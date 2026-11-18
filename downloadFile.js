@@ -10,7 +10,11 @@ function forceDownload(blob, filename) {
 }
 
 async function downloadResource(url, filename, button) {
-    
+    const card = button && button.closest('[data-audio-url]');
+    if (typeof trackEpisodeAction === 'function') {
+        trackEpisodeAction('baixar', card || { path: filename, episode: filename });
+    }
+
     var article = button.parentElement
     article.style.position = "relative"
     var progressBar = document.createElement('div')

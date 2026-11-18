@@ -81,6 +81,139 @@ function isInternalLink(url) {
     }
 }
 
+//Mark: Analytics
+// Daily totals only. No cookies or IDs. Local/LAN posts to the dev server on :8098.
+const EPISODE_MILESTONES = [
+    [0.25, 'episodio_25'],
+    [0.5, 'episodio_50'],
+    [0.75, 'episodio_75'],
+];
+const LIVE_HEARTBEAT_MS = 5 * 60 * 1000;
+let currentEpisodeMeta = null;
+const episodeMilestonesSent = {};
+let liveHeartbeat = null;
+let liveListening = false;
+
+function isLocalPreview() {
+    const host = location.hostname;
+    return host === 'localhost' || host === '127.0.0.1' || host.startsWith('192.168.');
+}
+
+function analyticsEndpoint(path = '/api/evento') {
+    return isLocalPreview() ? 'http://127.0.0.1:8098' + path : path;
+}
+
+function track(name, props = {}) {
+    if (navigator.doNotTrack === '1') return;
+    const payload = JSON.stringify({
+        event: name,
+        path: props.path || location.pathname,
+        program: props.program || '',
+        episode: props.episode || '',
+        station: props.station || '',
+        hour: props.hour ?? '',
+        device: window.matchMedia('(max-width: 768px)').matches ? 'mobile' : 'desktop',
+    });
+    // text/plain avoids a CORS preflight, which sendBeacon cannot complete cross-origin
+    // (needed for the local analytics server during development).
+    const blob = new Blob([payload], { type: 'text/plain' });
+    if (navigator.sendBeacon && navigator.sendBeacon(analyticsEndpoint(), blob)) return;
+    fetch(analyticsEndpoint(), {
+        method: 'POST',
+        body: payload,
+        headers: { 'Content-Type': 'text/plain' },
+        keepalive: true,
+        mode: 'cors',
+    }).catch(() => {});
+}
+
+function episodePathFor(url) {
+    const card = [...document.querySelectorAll('[data-audio-url]')].find(el => el.dataset.audioUrl === url);
+    return card?.dataset.path || '';
+}
+
+function trackEpisodeMilestones(url, position, duration) {
+    if (!url || duration <= 0) return;
+    const sent = episodeMilestonesSent[url] || (episodeMilestonesSent[url] = new Set());
+    const meta = (currentEpisodeMeta && currentEpisodeMeta.url === url)
+        ? currentEpisodeMeta
+        : { program: '', episode: '', path: episodePathFor(url) };
+    const ratio = position / duration;
+    for (const [mark, name] of EPISODE_MILESTONES) {
+        if (ratio >= mark && !sent.has(name)) {
+            sent.add(name);
+            track(name, meta);
+        }
+    }
+    if (position >= duration - FINISHED_MARGIN_SECONDS && !sent.has('episodio_fim')) {
+        sent.add('episodio_fim');
+        track('episodio_fim', meta);
+    }
+}
+
+function currentStationId() {
+    return localStorage.getItem('preferredStreamId') || '102';
+}
+
+function currentLiveProgramTitle() {
+    const schedule = getLiveSchedule();
+    if (!schedule) return '';
+    const time = stationTime(new Date());
+    const index = findProgramIndex(schedule.programs, time);
+    if (index >= 0) return schedule.programs[index].title || '';
+    return schedule.fallback?.title || '';
+}
+
+function liveTrackProps() {
+    const time = stationTime(new Date());
+    return {
+        station: currentStationId(),
+        program: currentLiveProgramTitle(),
+        hour: String(Math.floor(time.minutes / 60)).padStart(2, '0'),
+    };
+}
+
+function stopLiveAnalytics(sendEnd = true) {
+    if (liveHeartbeat) {
+        clearInterval(liveHeartbeat);
+        liveHeartbeat = null;
+    }
+    if (liveListening && sendEnd) {
+        track('ao_vivo_fim', liveTrackProps());
+    }
+    liveListening = false;
+}
+
+function startLiveAnalytics() {
+    if (streamFullTime > 0) return;
+    stopLiveAnalytics(false);
+    liveListening = true;
+    track('ao_vivo_inicio', liveTrackProps());
+    liveHeartbeat = setInterval(() => {
+        if (stream.paused || streamFullTime > 0) {
+            stopLiveAnalytics();
+            return;
+        }
+        track('ao_vivo_5min', liveTrackProps());
+    }, LIVE_HEARTBEAT_MS);
+}
+
+function trackEpisodeAction(name, cardOrMeta) {
+    if (!cardOrMeta) {
+        track(name);
+        return;
+    }
+    if (cardOrMeta.dataset) {
+        track(name, {
+            path: cardOrMeta.dataset.path || '',
+            program: cardOrMeta.dataset.program || '',
+            episode: cardOrMeta.dataset.title || '',
+        });
+        return;
+    }
+    track(name, cardOrMeta);
+}
+
 async function navigateToPage(url, addToHistory = true) {
     try {
         document.body.classList.add('navigating');
@@ -228,6 +361,8 @@ function initializePage(){
     renderMyList();
     renderListenProgress();
     updateBackButtonVisibility();
+    renderEstatisticas();
+    track('pagina', { path: location.pathname });
     // setupYouTubeAutoplay(); // COMMENTED OUT - Disabled to avoid interference with live audio streams
 }
 
@@ -690,6 +825,7 @@ function saveProgress(url, position, duration){
     try {
         localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress));
     } catch (error) {} // Storage full or disabled (private browsing).
+    trackEpisodeMilestones(url, position, duration);
     renderListenProgress(url);
 }
 
@@ -798,6 +934,7 @@ function toggleMyList(button){
     const index = myListIndex(card.dataset.audioUrl, list);
     if (index === -1) {
         list.push(episodeFromCard(card));
+        trackEpisodeAction('lista', card);
     } else {
         list.splice(index, 1);
     }
@@ -982,6 +1119,8 @@ async function switchStream(streamId){ //Caled ny the toggle buttons and the pla
 
     if (wasPlaying) {
         playStream();
+    } else if (liveListening) {
+        stopLiveAnalytics();
     }
     updateLiveStreamUI(streamId);
 }
@@ -1046,6 +1185,7 @@ function playStream(){
     addClass("bar-play-button", "playing");
     stream.play().then(() => {
         hideLoadingIndicator();
+        if (streamFullTime === 0) startLiveAnalytics();
     }).catch(() => {});
     scrubUpdater = window.setInterval(updateScrubber, 1000);
 }
@@ -1056,6 +1196,7 @@ function pauseStream(){
     clearInterval(scrubUpdater);
     // Hide loading indicator when paused
     hideLoadingIndicator();
+    if (streamFullTime === 0) stopLiveAnalytics();
 }
 
 // Helper function to update Media Session metadata for episodes
@@ -1142,8 +1283,16 @@ function playEpisode(audioUrl, title, time, programName, imageUrl){
     }
 
     saveCurrentProgress();
+    stopLiveAnalytics();
     currentEpisodeUrl = null;
     pendingEpisodeUrl = audioUrl;
+    currentEpisodeMeta = {
+        url: audioUrl,
+        path: episodePathFor(audioUrl),
+        program: programName || '',
+        episode: title || '',
+    };
+    track('episodio_play', currentEpisodeMeta);
     renderMyList();
 
     player.getElementsByTagName('source')[0].setAttribute('src', audioUrl);
@@ -1389,6 +1538,9 @@ function shareUrl(url, title){
 
     dialog.classList.remove("hidden")
     disableScrolling();
+    const card = [...document.querySelectorAll('[data-audio-url], [data-path]')].find(el =>
+        (el.dataset.path && url.includes(el.dataset.path)) || el.dataset.title === title);
+    trackEpisodeAction('compartilhar', card || { path: url, episode: title || '' });
 }
 
 function investirFinanceiramente(){
@@ -1509,4 +1661,90 @@ function removeClass(id, oldclass){
     if (element) {
         element.classList.remove(oldclass);
     }
+}
+
+//Mark: Estatísticas dashboard
+function statsEndpoint(from, to) {
+    return analyticsEndpoint('/api/estatisticas') + '?de=' + encodeURIComponent(from) + '&ate=' + encodeURIComponent(to);
+}
+
+function isoDate(date) {
+    return date.toISOString().slice(0, 10);
+}
+
+function fillStatsTable(table, rows, columns) {
+    if (!table) return;
+    const body = table.querySelector('tbody');
+    if (!body) return;
+    body.replaceChildren();
+    if (!rows.length) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = columns.length;
+        td.textContent = 'Nenhum dado neste período.';
+        tr.appendChild(td);
+        body.appendChild(tr);
+        return;
+    }
+    rows.forEach(row => {
+        const tr = document.createElement('tr');
+        columns.forEach(col => {
+            const td = document.createElement('td');
+            td.textContent = row[col] ?? '';
+            tr.appendChild(td);
+        });
+        body.appendChild(tr);
+    });
+}
+
+async function renderEstatisticas() {
+    const root = document.getElementById('estatisticas');
+    if (!root) return;
+
+    const fromInput = document.getElementById('stats-from');
+    const toInput = document.getElementById('stats-to');
+    const status = document.getElementById('stats-status');
+    const today = isoDate(new Date());
+    if (fromInput && !fromInput.value) fromInput.value = today;
+    if (toInput && !toInput.value) toInput.value = today;
+
+    const load = async () => {
+        if (status) status.textContent = 'Carregando…';
+        try {
+            const response = await fetch(statsEndpoint(fromInput.value, toInput.value));
+            if (!response.ok) throw new Error('HTTP ' + response.status);
+            const data = await response.json();
+            const totals = data.totals || {};
+            root.querySelectorAll('[data-total]').forEach(el => {
+                el.textContent = totals[el.dataset.total] ?? 0;
+            });
+            const liveMinutes = (data.live || [])
+                .filter(row => row.event === 'ao_vivo_5min')
+                .reduce((n, row) => n + (row.minutes || 0), 0);
+            const liveTotal = root.querySelector('[data-total="ao_vivo_minutos"]');
+            if (liveTotal) liveTotal.textContent = liveMinutes;
+
+            fillStatsTable(document.getElementById('stats-pages'), data.pages || [], ['key', 'total', 'mobile', 'desktop']);
+            fillStatsTable(document.getElementById('stats-episodes'), data.episodes || [], ['key', 'plays', 'finished', 'rate']);
+            fillStatsTable(
+                document.getElementById('stats-live'),
+                (data.live || []).filter(row => row.event === 'ao_vivo_5min'),
+                ['station', 'hour', 'program', 'minutes']
+            );
+            fillStatsTable(document.getElementById('stats-lista'), data.lista || [], ['key', 'total']);
+            fillStatsTable(document.getElementById('stats-share'), data.compartilhar || [], ['key', 'total']);
+            fillStatsTable(document.getElementById('stats-download'), data.baixar || [], ['key', 'total']);
+            if (status) status.textContent = 'De ' + data.de + ' até ' + data.ate;
+        } catch (error) {
+            console.error(error);
+            if (status) status.textContent = 'Não foi possível carregar as estatísticas.';
+        }
+    };
+
+    const button = document.getElementById('stats-refresh');
+    if (button && !button.dataset.bound) {
+        button.dataset.bound = '1';
+        button.addEventListener('click', load);
+    }
+    load();
 }
