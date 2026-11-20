@@ -159,12 +159,14 @@ function currentStationId() {
 }
 
 function currentLiveProgramTitle() {
+    // Same rules as the Programação page / live banner: named slot when on air,
+    // otherwise the schedule fallback ("Ao Vivo" for open segments).
     const schedule = getLiveSchedule();
     if (!schedule) return '';
     const time = stationTime(new Date());
     const index = findProgramIndex(schedule.programs, time);
     if (index >= 0) return schedule.programs[index].title || '';
-    return schedule.fallback?.title || '';
+    return schedule.fallback?.title || 'Ao Vivo';
 }
 
 function liveTrackProps() {
