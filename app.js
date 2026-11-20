@@ -1822,8 +1822,11 @@ async function renderEstatisticas() {
     const fromInput = document.getElementById('stats-from');
     const toInput = document.getElementById('stats-to');
     const status = document.getElementById('stats-status');
-    const today = isoDate(new Date());
-    if (fromInput && !fromInput.value) fromInput.value = today;
+    const now = new Date();
+    const today = isoDate(now);
+    // Inclusive window: today and the previous 29 days.
+    const thirtyDaysAgo = isoDate(new Date(now.getTime() - 29 * 24 * 60 * 60 * 1000));
+    if (fromInput && !fromInput.value) fromInput.value = thirtyDaysAgo;
     if (toInput && !toInput.value) toInput.value = today;
 
     const load = async () => {
