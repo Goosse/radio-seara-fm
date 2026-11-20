@@ -1689,7 +1689,14 @@ function statsEndpoint(from, to) {
 }
 
 function isoDate(date) {
-    return date.toLocaleDateString('en-CA', { timeZone: 'America/Fortaleza' });
+    const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/Fortaleza',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+    }).formatToParts(date);
+    const value = (type) => parts.find((part) => part.type === type).value;
+    return `${value('year')}-${value('month')}-${value('day')}`;
 }
 
 function fillStatsTable(table, rows, columns) {
