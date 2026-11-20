@@ -311,6 +311,11 @@ const STREAM_CONFIG = {
 };
 
 const LIVE_STREAM_ARTWORK = 'https://radioseara.fm/recursos/capas/semmarca/ao-vivo.webp';
+const LIVE_RECONNECT_MAX = 8;
+let liveReconnectTimer = null;
+let liveReconnecting = false;
+let liveReconnectAttempts = 0;
+
 // Loading indicator management (only for bar player)
 function showLoadingIndicator() {
     const barButton = document.getElementById('bar-play-button');
@@ -320,6 +325,60 @@ function showLoadingIndicator() {
 function hideLoadingIndicator() {
     const barButton = document.getElementById('bar-play-button');
     if (barButton) barButton.classList.remove('buffering');
+}
+
+function isLiveAudio() {
+    return streamFullTime === 0;
+}
+
+function livePlayIntended() {
+    const playBtn = document.getElementById('bar-play-button');
+    return !!(playBtn && playBtn.classList.contains('playing'));
+}
+
+function reloadLiveSource() {
+    const sourceEl = stream.getElementsByTagName('source')[0];
+    if (!sourceEl) return;
+    const base = STREAM_CONFIG[currentStationId()].url;
+    // Cache-bust so the browser opens a fresh Icecast HTTP connection.
+    sourceEl.setAttribute('src', base + (base.includes('?') ? '&' : '?') + '_=' + Date.now());
+    streamFullTime = 0;
+    stream.load();
+}
+
+function scheduleLiveReconnect() {
+    if (!isLiveAudio() || !livePlayIntended()) return;
+    if (liveReconnecting) return;
+    if (liveReconnectAttempts >= LIVE_RECONNECT_MAX) {
+        removeClass('bar-play-button', 'playing');
+        hideLoadingIndicator();
+        stopLiveAnalytics();
+        liveReconnectAttempts = 0;
+        return;
+    }
+    liveReconnecting = true;
+    showLoadingIndicator();
+    const delay = Math.min(1000 * Math.pow(1.5, liveReconnectAttempts), 10000);
+    liveReconnectAttempts += 1;
+    clearTimeout(liveReconnectTimer);
+    liveReconnectTimer = setTimeout(() => {
+        reloadLiveSource();
+        stream.play().then(() => {
+            liveReconnecting = false;
+            hideLoadingIndicator();
+            startLiveAnalytics();
+        }).catch(() => {
+            liveReconnecting = false;
+            scheduleLiveReconnect();
+        });
+    }, delay);
+}
+
+function resetLiveReconnect() {
+    liveReconnectAttempts = 0;
+    liveReconnecting = false;
+    clearTimeout(liveReconnectTimer);
+    liveReconnectTimer = null;
 }
 
 // Calculate distance between two coordinates using Haversine formula
@@ -689,6 +748,22 @@ stream.addEventListener("loadstart", function() {
 stream.addEventListener("canplay", function() {
     hideLoadingIndicator();
 });
+stream.addEventListener('playing', function() {
+    if (isLiveAudio()) resetLiveReconnect();
+    hideLoadingIndicator();
+});
+stream.addEventListener('error', function() {
+    if (isLiveAudio() && livePlayIntended()) scheduleLiveReconnect();
+});
+stream.addEventListener('stalled', function() {
+    if (!isLiveAudio() || !livePlayIntended() || liveReconnecting) return;
+    clearTimeout(liveReconnectTimer);
+    liveReconnectTimer = setTimeout(() => {
+        if (isLiveAudio() && livePlayIntended() && stream.readyState < 2) {
+            scheduleLiveReconnect();
+        }
+    }, 8000);
+});
 
 stream.addEventListener("volumechange", function() {
     // Show volume slider only on non-iOS devices
@@ -877,6 +952,12 @@ stream.addEventListener('loadedmetadata', () => {
 stream.addEventListener('pause', saveCurrentProgress);
 stream.addEventListener('ended', () => {
     saveCurrentProgress();
+    if (isLiveAudio()) {
+        // Icecast closed the HTTP response; reopen instead of treating it like an episode end.
+        addClass('bar-play-button', 'playing');
+        scheduleLiveReconnect();
+        return;
+    }
     removeClass("bar-play-button", "playing");
     clearInterval(scrubUpdater);
     playNextInMyList(currentEpisodeUrl);
@@ -1205,20 +1286,28 @@ function playStream(){
         clearInterval(scrubUpdater);
     }
     addClass("bar-play-button", "playing");
+    // A dead live connection cannot be resumed with play() alone — open a new request.
+    if (isLiveAudio() && (stream.error || stream.ended || stream.readyState === 0)) {
+        reloadLiveSource();
+    }
+    showLoadingIndicator();
     stream.play().then(() => {
         hideLoadingIndicator();
-        if (streamFullTime === 0) startLiveAnalytics();
-    }).catch(() => {});
+        if (isLiveAudio()) startLiveAnalytics();
+    }).catch(() => {
+        if (isLiveAudio()) scheduleLiveReconnect();
+    });
     scrubUpdater = window.setInterval(updateScrubber, 1000);
 }
 
 function pauseStream(){
+    resetLiveReconnect();
     removeClass("bar-play-button", "playing");
     stream.pause();
     clearInterval(scrubUpdater);
     // Hide loading indicator when paused
     hideLoadingIndicator();
-    if (streamFullTime === 0) stopLiveAnalytics();
+    if (isLiveAudio()) stopLiveAnalytics();
 }
 
 // Helper function to update Media Session metadata for episodes
