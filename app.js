@@ -442,7 +442,6 @@ function initializePage(){
     renderMyList();
     renderListenProgress();
     updateBackButtonVisibility();
-    renderEstatisticas();
     track('pagina', { path: location.pathname });
     // setupYouTubeAutoplay(); // COMMENTED OUT - Disabled to avoid interference with live audio streams
 }
@@ -1772,100 +1771,4 @@ function removeClass(id, oldclass){
     if (element) {
         element.classList.remove(oldclass);
     }
-}
-
-//Mark: Estatísticas dashboard
-function statsEndpoint(from, to) {
-    return analyticsEndpoint('/api/estatisticas') + '?de=' + encodeURIComponent(from) + '&ate=' + encodeURIComponent(to);
-}
-
-function isoDate(date) {
-    const parts = new Intl.DateTimeFormat('en-US', {
-        timeZone: 'America/Fortaleza',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-    }).formatToParts(date);
-    const value = (type) => parts.find((part) => part.type === type).value;
-    return `${value('year')}-${value('month')}-${value('day')}`;
-}
-
-function fillStatsTable(table, rows, columns) {
-    if (!table) return;
-    const body = table.querySelector('tbody');
-    if (!body) return;
-    body.replaceChildren();
-    if (!rows.length) {
-        const tr = document.createElement('tr');
-        const td = document.createElement('td');
-        td.colSpan = columns.length;
-        td.textContent = 'Nenhum dado neste período.';
-        tr.appendChild(td);
-        body.appendChild(tr);
-        return;
-    }
-    rows.forEach(row => {
-        const tr = document.createElement('tr');
-        columns.forEach(col => {
-            const td = document.createElement('td');
-            td.textContent = row[col] ?? '';
-            tr.appendChild(td);
-        });
-        body.appendChild(tr);
-    });
-}
-
-async function renderEstatisticas() {
-    const root = document.getElementById('estatisticas');
-    if (!root) return;
-
-    const fromInput = document.getElementById('stats-from');
-    const toInput = document.getElementById('stats-to');
-    const status = document.getElementById('stats-status');
-    const now = new Date();
-    const today = isoDate(now);
-    // Inclusive window: today and the previous 29 days.
-    const thirtyDaysAgo = isoDate(new Date(now.getTime() - 29 * 24 * 60 * 60 * 1000));
-    if (fromInput && !fromInput.value) fromInput.value = thirtyDaysAgo;
-    if (toInput && !toInput.value) toInput.value = today;
-
-    const load = async () => {
-        if (status) status.textContent = 'Carregando…';
-        try {
-            const response = await fetch(statsEndpoint(fromInput.value, toInput.value));
-            if (!response.ok) throw new Error('HTTP ' + response.status);
-            const data = await response.json();
-            const totals = data.totals || {};
-            root.querySelectorAll('[data-total]').forEach(el => {
-                el.textContent = totals[el.dataset.total] ?? 0;
-            });
-            const liveMinutes = (data.live || [])
-                .filter(row => row.event === 'ao_vivo_5min')
-                .reduce((n, row) => n + (row.minutes || 0), 0);
-            const liveTotal = root.querySelector('[data-total="ao_vivo_minutos"]');
-            if (liveTotal) liveTotal.textContent = liveMinutes;
-
-            fillStatsTable(document.getElementById('stats-pages'), data.pages || [], ['key', 'total', 'mobile', 'desktop']);
-            fillStatsTable(document.getElementById('stats-episodes'), data.episodes || [], ['key', 'plays', 'finished', 'rate']);
-            fillStatsTable(
-                document.getElementById('stats-live'),
-                (data.live || []).filter(row => row.event === 'ao_vivo_5min'),
-                ['station', 'hour', 'program', 'minutes']
-            );
-            fillStatsTable(document.getElementById('stats-lista'), data.lista || [], ['key', 'total']);
-            fillStatsTable(document.getElementById('stats-share'), data.compartilhar || [], ['key', 'total']);
-            fillStatsTable(document.getElementById('stats-download'), data.baixar || [], ['key', 'total']);
-            if (status) status.textContent = 'De ' + data.de + ' até ' + data.ate;
-        } catch (error) {
-            console.error(error);
-            if (status) status.textContent = 'Não foi possível carregar as estatísticas.';
-        }
-    };
-
-    const button = document.getElementById('stats-refresh');
-    if (button && !button.dataset.bound) {
-        button.dataset.bound = '1';
-        button.addEventListener('click', load);
-    }
-    load();
 }

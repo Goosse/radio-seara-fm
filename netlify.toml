@@ -6,12 +6,6 @@
   force = true
 
 [[redirects]]
-  from = "/api/estatisticas"
-  to = "https://api.radioseara.fm/estatisticas"
-  status = 200
-  force = true
-
-[[redirects]]
 from = "http://radioseara.com.br"
 to = "https://radioseara.fm"
 status = 301.0
