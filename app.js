@@ -88,11 +88,14 @@ const EPISODE_MILESTONES = [
     [0.5, 'episodio_50'],
     [0.75, 'episodio_75'],
 ];
-const LIVE_HEARTBEAT_MS = 5 * 60 * 1000;
+// Count listening in 1-minute ticks so short sessions still show on the dashboard.
+const LIVE_HEARTBEAT_MS = 60 * 1000;
 let currentEpisodeMeta = null;
 const episodeMilestonesSent = {};
 let liveHeartbeat = null;
 let liveListening = false;
+let liveStartedAt = 0;
+let liveMinutesSent = 0;
 
 function isLocalPreview() {
     const host = location.hostname;
@@ -173,29 +176,46 @@ function liveTrackProps() {
     };
 }
 
+function flushLiveMinutes() {
+    if (!liveListening || !liveStartedAt) return;
+    const elapsed = Date.now() - liveStartedAt;
+    let minutes = Math.floor(elapsed / LIVE_HEARTBEAT_MS);
+    // Short sessions still count: after 30s with no full minute yet, credit one.
+    if (minutes === 0 && elapsed >= 30 * 1000) minutes = 1;
+    while (liveMinutesSent < minutes) {
+        liveMinutesSent += 1;
+        track('ao_vivo_5min', liveTrackProps());
+    }
+}
+
 function stopLiveAnalytics(sendEnd = true) {
     if (liveHeartbeat) {
         clearInterval(liveHeartbeat);
         liveHeartbeat = null;
     }
-    if (liveListening && sendEnd) {
-        track('ao_vivo_fim', liveTrackProps());
+    if (liveListening) {
+        flushLiveMinutes();
+        if (sendEnd) track('ao_vivo_fim', liveTrackProps());
     }
     liveListening = false;
+    liveStartedAt = 0;
+    liveMinutesSent = 0;
 }
 
 function startLiveAnalytics() {
     if (streamFullTime > 0) return;
     stopLiveAnalytics(false);
     liveListening = true;
+    liveStartedAt = Date.now();
+    liveMinutesSent = 0;
     track('ao_vivo_inicio', liveTrackProps());
     liveHeartbeat = setInterval(() => {
         if (stream.paused || streamFullTime > 0) {
             stopLiveAnalytics();
             return;
         }
-        track('ao_vivo_5min', liveTrackProps());
-    }, LIVE_HEARTBEAT_MS);
+        flushLiveMinutes();
+    }, 15 * 1000);
 }
 
 function trackEpisodeAction(name, cardOrMeta) {
@@ -1669,7 +1689,7 @@ function statsEndpoint(from, to) {
 }
 
 function isoDate(date) {
-    return date.toISOString().slice(0, 10);
+    return date.toLocaleDateString('en-CA', { timeZone: 'America/Fortaleza' });
 }
 
 function fillStatsTable(table, rows, columns) {
