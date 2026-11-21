@@ -107,7 +107,8 @@ function analyticsEndpoint(path = '/api/evento') {
 }
 
 function track(name, props = {}) {
-    if (navigator.doNotTrack === '1') return;
+    // Automated browsers (crawlers, test tools) report navigator.webdriver.
+    if (navigator.doNotTrack === '1' || navigator.webdriver) return;
     const payload = JSON.stringify({
         event: name,
         path: props.path || location.pathname,
