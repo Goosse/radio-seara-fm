@@ -1,3 +1,10 @@
+# Analytics: browser hits first-party /api/*, Netlify proxies to the API server.
+[[redirects]]
+  from = "/api/evento"
+  to = "https://api.radioseara.fm/evento"
+  status = 200
+  force = true
+
 [[redirects]]
 from = "http://radioseara.com.br"
 to = "https://radioseara.fm"

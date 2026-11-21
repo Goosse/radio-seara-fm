@@ -81,6 +81,161 @@ function isInternalLink(url) {
     }
 }
 
+//Mark: Analytics
+// Daily totals only. No cookies or IDs. Local/LAN posts to the dev server on :8098.
+const EPISODE_MILESTONES = [
+    [0.25, 'episodio_25'],
+    [0.5, 'episodio_50'],
+    [0.75, 'episodio_75'],
+];
+// Count listening in 1-minute ticks so short sessions still show on the dashboard.
+const LIVE_HEARTBEAT_MS = 60 * 1000;
+let currentEpisodeMeta = null;
+const episodeMilestonesSent = {};
+let liveHeartbeat = null;
+let liveListening = false;
+let liveStartedAt = 0;
+let liveMinutesSent = 0;
+
+function isLocalPreview() {
+    const host = location.hostname;
+    return host === 'localhost' || host === '127.0.0.1' || host.startsWith('192.168.');
+}
+
+function analyticsEndpoint(path = '/api/evento') {
+    return isLocalPreview() ? 'http://127.0.0.1:8098' + path : path;
+}
+
+function track(name, props = {}) {
+    if (navigator.doNotTrack === '1') return;
+    const payload = JSON.stringify({
+        event: name,
+        path: props.path || location.pathname,
+        program: props.program || '',
+        episode: props.episode || '',
+        station: props.station || '',
+        hour: props.hour ?? '',
+        device: window.matchMedia('(max-width: 768px)').matches ? 'mobile' : 'desktop',
+    });
+    // text/plain avoids a CORS preflight, which sendBeacon cannot complete cross-origin
+    // (needed for the local analytics server during development).
+    const blob = new Blob([payload], { type: 'text/plain' });
+    if (navigator.sendBeacon && navigator.sendBeacon(analyticsEndpoint(), blob)) return;
+    fetch(analyticsEndpoint(), {
+        method: 'POST',
+        body: payload,
+        headers: { 'Content-Type': 'text/plain' },
+        keepalive: true,
+        mode: 'cors',
+    }).catch(() => {});
+}
+
+function episodePathFor(url) {
+    const card = [...document.querySelectorAll('[data-audio-url]')].find(el => el.dataset.audioUrl === url);
+    return card?.dataset.path || '';
+}
+
+function trackEpisodeMilestones(url, position, duration) {
+    if (!url || duration <= 0) return;
+    const sent = episodeMilestonesSent[url] || (episodeMilestonesSent[url] = new Set());
+    const meta = (currentEpisodeMeta && currentEpisodeMeta.url === url)
+        ? currentEpisodeMeta
+        : { program: '', episode: '', path: episodePathFor(url) };
+    const ratio = position / duration;
+    for (const [mark, name] of EPISODE_MILESTONES) {
+        if (ratio >= mark && !sent.has(name)) {
+            sent.add(name);
+            track(name, meta);
+        }
+    }
+    if (position >= duration - FINISHED_MARGIN_SECONDS && !sent.has('episodio_fim')) {
+        sent.add('episodio_fim');
+        track('episodio_fim', meta);
+    }
+}
+
+function currentStationId() {
+    return localStorage.getItem('preferredStreamId') || '102';
+}
+
+function currentLiveProgramTitle() {
+    // Same rules as the Programação page / live banner: named slot when on air,
+    // otherwise the schedule fallback ("Ao Vivo" for open segments).
+    const schedule = getLiveSchedule();
+    if (!schedule) return '';
+    const time = stationTime(new Date());
+    const index = findProgramIndex(schedule.programs, time);
+    if (index >= 0) return schedule.programs[index].title || '';
+    return schedule.fallback?.title || 'Ao Vivo';
+}
+
+function liveTrackProps() {
+    const time = stationTime(new Date());
+    return {
+        station: currentStationId(),
+        program: currentLiveProgramTitle(),
+        hour: String(Math.floor(time.minutes / 60)).padStart(2, '0'),
+    };
+}
+
+function flushLiveMinutes() {
+    if (!liveListening || !liveStartedAt) return;
+    const elapsed = Date.now() - liveStartedAt;
+    let minutes = Math.floor(elapsed / LIVE_HEARTBEAT_MS);
+    // Short sessions still count: after 30s with no full minute yet, credit one.
+    if (minutes === 0 && elapsed >= 30 * 1000) minutes = 1;
+    while (liveMinutesSent < minutes) {
+        liveMinutesSent += 1;
+        track('ao_vivo_5min', liveTrackProps());
+    }
+}
+
+function stopLiveAnalytics(sendEnd = true) {
+    if (liveHeartbeat) {
+        clearInterval(liveHeartbeat);
+        liveHeartbeat = null;
+    }
+    if (liveListening) {
+        flushLiveMinutes();
+        if (sendEnd) track('ao_vivo_fim', liveTrackProps());
+    }
+    liveListening = false;
+    liveStartedAt = 0;
+    liveMinutesSent = 0;
+}
+
+function startLiveAnalytics() {
+    if (streamFullTime > 0) return;
+    stopLiveAnalytics(false);
+    liveListening = true;
+    liveStartedAt = Date.now();
+    liveMinutesSent = 0;
+    track('ao_vivo_inicio', liveTrackProps());
+    liveHeartbeat = setInterval(() => {
+        if (stream.paused || streamFullTime > 0) {
+            stopLiveAnalytics();
+            return;
+        }
+        flushLiveMinutes();
+    }, 15 * 1000);
+}
+
+function trackEpisodeAction(name, cardOrMeta) {
+    if (!cardOrMeta) {
+        track(name);
+        return;
+    }
+    if (cardOrMeta.dataset) {
+        track(name, {
+            path: cardOrMeta.dataset.path || '',
+            program: cardOrMeta.dataset.program || '',
+            episode: cardOrMeta.dataset.title || '',
+        });
+        return;
+    }
+    track(name, cardOrMeta);
+}
+
 async function navigateToPage(url, addToHistory = true) {
     try {
         document.body.classList.add('navigating');
@@ -156,6 +311,11 @@ const STREAM_CONFIG = {
 };
 
 const LIVE_STREAM_ARTWORK = 'https://radioseara.fm/recursos/capas/semmarca/ao-vivo.webp';
+const LIVE_RECONNECT_MAX = 8;
+let liveReconnectTimer = null;
+let liveReconnecting = false;
+let liveReconnectAttempts = 0;
+
 // Loading indicator management (only for bar player)
 function showLoadingIndicator() {
     const barButton = document.getElementById('bar-play-button');
@@ -165,6 +325,60 @@ function showLoadingIndicator() {
 function hideLoadingIndicator() {
     const barButton = document.getElementById('bar-play-button');
     if (barButton) barButton.classList.remove('buffering');
+}
+
+function isLiveAudio() {
+    return streamFullTime === 0;
+}
+
+function livePlayIntended() {
+    const playBtn = document.getElementById('bar-play-button');
+    return !!(playBtn && playBtn.classList.contains('playing'));
+}
+
+function reloadLiveSource() {
+    const sourceEl = stream.getElementsByTagName('source')[0];
+    if (!sourceEl) return;
+    const base = STREAM_CONFIG[currentStationId()].url;
+    // Cache-bust so the browser opens a fresh Icecast HTTP connection.
+    sourceEl.setAttribute('src', base + (base.includes('?') ? '&' : '?') + '_=' + Date.now());
+    streamFullTime = 0;
+    stream.load();
+}
+
+function scheduleLiveReconnect() {
+    if (!isLiveAudio() || !livePlayIntended()) return;
+    if (liveReconnecting) return;
+    if (liveReconnectAttempts >= LIVE_RECONNECT_MAX) {
+        removeClass('bar-play-button', 'playing');
+        hideLoadingIndicator();
+        stopLiveAnalytics();
+        liveReconnectAttempts = 0;
+        return;
+    }
+    liveReconnecting = true;
+    showLoadingIndicator();
+    const delay = Math.min(1000 * Math.pow(1.5, liveReconnectAttempts), 10000);
+    liveReconnectAttempts += 1;
+    clearTimeout(liveReconnectTimer);
+    liveReconnectTimer = setTimeout(() => {
+        reloadLiveSource();
+        stream.play().then(() => {
+            liveReconnecting = false;
+            hideLoadingIndicator();
+            startLiveAnalytics();
+        }).catch(() => {
+            liveReconnecting = false;
+            scheduleLiveReconnect();
+        });
+    }, delay);
+}
+
+function resetLiveReconnect() {
+    liveReconnectAttempts = 0;
+    liveReconnecting = false;
+    clearTimeout(liveReconnectTimer);
+    liveReconnectTimer = null;
 }
 
 // Calculate distance between two coordinates using Haversine formula
@@ -228,6 +442,7 @@ function initializePage(){
     renderMyList();
     renderListenProgress();
     updateBackButtonVisibility();
+    track('pagina', { path: location.pathname });
     // setupYouTubeAutoplay(); // COMMENTED OUT - Disabled to avoid interference with live audio streams
 }
 
@@ -532,6 +747,22 @@ stream.addEventListener("loadstart", function() {
 stream.addEventListener("canplay", function() {
     hideLoadingIndicator();
 });
+stream.addEventListener('playing', function() {
+    if (isLiveAudio()) resetLiveReconnect();
+    hideLoadingIndicator();
+});
+stream.addEventListener('error', function() {
+    if (isLiveAudio() && livePlayIntended()) scheduleLiveReconnect();
+});
+stream.addEventListener('stalled', function() {
+    if (!isLiveAudio() || !livePlayIntended() || liveReconnecting) return;
+    clearTimeout(liveReconnectTimer);
+    liveReconnectTimer = setTimeout(() => {
+        if (isLiveAudio() && livePlayIntended() && stream.readyState < 2) {
+            scheduleLiveReconnect();
+        }
+    }, 8000);
+});
 
 stream.addEventListener("volumechange", function() {
     // Show volume slider only on non-iOS devices
@@ -690,6 +921,7 @@ function saveProgress(url, position, duration){
     try {
         localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress));
     } catch (error) {} // Storage full or disabled (private browsing).
+    trackEpisodeMilestones(url, position, duration);
     renderListenProgress(url);
 }
 
@@ -719,6 +951,12 @@ stream.addEventListener('loadedmetadata', () => {
 stream.addEventListener('pause', saveCurrentProgress);
 stream.addEventListener('ended', () => {
     saveCurrentProgress();
+    if (isLiveAudio()) {
+        // Icecast closed the HTTP response; reopen instead of treating it like an episode end.
+        addClass('bar-play-button', 'playing');
+        scheduleLiveReconnect();
+        return;
+    }
     removeClass("bar-play-button", "playing");
     clearInterval(scrubUpdater);
     playNextInMyList(currentEpisodeUrl);
@@ -798,6 +1036,7 @@ function toggleMyList(button){
     const index = myListIndex(card.dataset.audioUrl, list);
     if (index === -1) {
         list.push(episodeFromCard(card));
+        trackEpisodeAction('lista', card);
     } else {
         list.splice(index, 1);
     }
@@ -982,6 +1221,8 @@ async function switchStream(streamId){ //Caled ny the toggle buttons and the pla
 
     if (wasPlaying) {
         playStream();
+    } else if (liveListening) {
+        stopLiveAnalytics();
     }
     updateLiveStreamUI(streamId);
 }
@@ -1044,18 +1285,28 @@ function playStream(){
         clearInterval(scrubUpdater);
     }
     addClass("bar-play-button", "playing");
+    // A dead live connection cannot be resumed with play() alone — open a new request.
+    if (isLiveAudio() && (stream.error || stream.ended || stream.readyState === 0)) {
+        reloadLiveSource();
+    }
+    showLoadingIndicator();
     stream.play().then(() => {
         hideLoadingIndicator();
-    }).catch(() => {});
+        if (isLiveAudio()) startLiveAnalytics();
+    }).catch(() => {
+        if (isLiveAudio()) scheduleLiveReconnect();
+    });
     scrubUpdater = window.setInterval(updateScrubber, 1000);
 }
 
 function pauseStream(){
+    resetLiveReconnect();
     removeClass("bar-play-button", "playing");
     stream.pause();
     clearInterval(scrubUpdater);
     // Hide loading indicator when paused
     hideLoadingIndicator();
+    if (isLiveAudio()) stopLiveAnalytics();
 }
 
 // Helper function to update Media Session metadata for episodes
@@ -1142,8 +1393,16 @@ function playEpisode(audioUrl, title, time, programName, imageUrl){
     }
 
     saveCurrentProgress();
+    stopLiveAnalytics();
     currentEpisodeUrl = null;
     pendingEpisodeUrl = audioUrl;
+    currentEpisodeMeta = {
+        url: audioUrl,
+        path: episodePathFor(audioUrl),
+        program: programName || '',
+        episode: title || '',
+    };
+    track('episodio_play', currentEpisodeMeta);
     renderMyList();
 
     player.getElementsByTagName('source')[0].setAttribute('src', audioUrl);
@@ -1389,6 +1648,9 @@ function shareUrl(url, title){
 
     dialog.classList.remove("hidden")
     disableScrolling();
+    const card = [...document.querySelectorAll('[data-audio-url], [data-path]')].find(el =>
+        (el.dataset.path && url.includes(el.dataset.path)) || el.dataset.title === title);
+    trackEpisodeAction('compartilhar', card || { path: url, episode: title || '' });
 }
 
 function investirFinanceiramente(){

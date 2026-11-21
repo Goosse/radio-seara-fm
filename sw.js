@@ -1,7 +1,7 @@
 //Somehow I need to get a build tag built into thise serviceworker file, because caches will only be updated if this file changes.
 
-const buildTag = "20261119163548";
-const precachedResources = ["/", "/algemas-quebradas/", "/recursos/capas/semmarca/algemas-quebradas.webp", "/culto-ice-nova-russas/", "/recursos/capas/semmarca/culto-ice-nova-russas.webp", "/familia-bencao-de-deus/", "/recursos/capas/semmarca/familia-bencao-de-deus.webp", "/jornal-seara/", "/recursos/capas/semmarca/jornal-seara.webp", "/ligado-na-verdade/", "/recursos/capas/semmarca/ligado-na-verdade.webp", "/minha-historia/", "/recursos/capas/semmarca/minha-historia.webp", "/seara-esporte-clube/", "/recursos/capas/semmarca/seara-esporte-clube.webp", "/a-esposa-por-tras/", "/baixar-algemas-quebradas/", "/minha-lista/", "/parceiros/", "/programacao/", "/baixar-minha-historia/", "/styles.css"];
+const buildTag = "202611210411";
+const precachedResources = ["/", "/algemas-quebradas/", "/recursos/capas/semmarca/algemas-quebradas.webp", "/culto-ice-nova-russas/", "/recursos/capas/semmarca/culto-ice-nova-russas.webp", "/familia-bencao-de-deus/", "/recursos/capas/semmarca/familia-bencao-de-deus.webp", "/jornal-seara/", "/recursos/capas/semmarca/jornal-seara.webp", "/ligado-na-verdade/", "/recursos/capas/semmarca/ligado-na-verdade.webp", "/minha-historia/", "/recursos/capas/semmarca/minha-historia.webp", "/seara-esporte-clube/", "/recursos/capas/semmarca/seara-esporte-clube.webp", "/baixar-algemas-quebradas/", "/programacao/", "/minha-lista/", "/a-esposa-por-tras/", "/baixar-minha-historia/", "/parceiros/", "/styles.css"];
 const origin = new URL(location).origin;
 
 // Live streams should never be cached - they're real-time and constantly changing
@@ -153,8 +153,12 @@ self.addEventListener("fetch", (event) => {
         );
         return;
     }
+
+    // Analytics must always hit the network and must never be cached.
+    if (event.request.url.indexOf('/api/') !== -1) {
+        event.respondWith(fetch(event.request));
+        return;
+    }
     
-//    if (event.request.url.indexOf('google') == -1 && event.request.url.indexOf('browser-sync') == -1) { //Don't cache analytics requests
         event.respondWith(cacheFirst(event.request));
- //   }
 });
