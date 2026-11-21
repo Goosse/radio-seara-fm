@@ -1402,7 +1402,16 @@ function playEpisode(audioUrl, title, time, programName, imageUrl){
         program: programName || '',
         episode: title || '',
     };
-    track('episodio_play', currentEpisodeMeta);
+    // Picking up where the listener stopped continues the earlier play: don't count
+    // it again, and don't resend the milestones that session already passed.
+    const saved = loadProgress()[audioUrl];
+    const passed = new Set();
+    if (saved && isUnfinished(saved)) {
+        EPISODE_MILESTONES.forEach(([mark, name]) => saved.t / saved.d >= mark && passed.add(name));
+    } else {
+        track('episodio_play', currentEpisodeMeta);
+    }
+    episodeMilestonesSent[audioUrl] = passed;
     renderMyList();
 
     player.getElementsByTagName('source')[0].setAttribute('src', audioUrl);
