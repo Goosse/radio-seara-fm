@@ -938,6 +938,23 @@ function isUnfinished(entry){
     return entry.t >= RESUME_MIN_SECONDS && entry.t < entry.d - FINISHED_MARGIN_SECONDS;
 }
 
+// A play counts once this much audio has actually played, so quick taps don't add plays.
+const PLAY_COUNT_SECONDS = 10;
+let pendingPlay = null;
+
+stream.addEventListener('timeupdate', () => {
+    if (!pendingPlay || stream.paused || isLiveAudio()) return;
+    const now = stream.currentTime;
+    // Small forward steps are playback; bigger jumps are seeks and don't count.
+    const step = pendingPlay.last === null ? 0 : now - pendingPlay.last;
+    if (step > 0 && step < 2) pendingPlay.listened += step;
+    pendingPlay.last = now;
+    if (pendingPlay.listened >= PLAY_COUNT_SECONDS) {
+        track('episodio_play', pendingPlay.meta);
+        pendingPlay = null;
+    }
+});
+
 stream.addEventListener('loadedmetadata', () => {
     if (!pendingEpisodeUrl) return;
     const entry = loadProgress()[pendingEpisodeUrl];
@@ -1409,8 +1426,9 @@ function playEpisode(audioUrl, title, time, programName, imageUrl){
     const passed = new Set();
     if (saved && isUnfinished(saved)) {
         EPISODE_MILESTONES.forEach(([mark, name]) => saved.t / saved.d >= mark && passed.add(name));
+        pendingPlay = null;
     } else {
-        track('episodio_play', currentEpisodeMeta);
+        pendingPlay = { meta: currentEpisodeMeta, listened: 0, last: null };
     }
     episodeMilestonesSent[audioUrl] = passed;
     renderMyList();
